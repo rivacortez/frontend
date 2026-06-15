@@ -68,3 +68,36 @@ export async function establishSession(
   })
   return user
 }
+
+type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
+
+/**
+ * Llama al backend NestJS inyectando el `Bearer` de la sesión (sellado en `secure`,
+ * server-only). El cliente nunca ve el token. Propaga el status del backend (401/403/…).
+ * Helper reutilizable para proxear rutas protegidas a medida que el backend las exponga.
+ */
+export async function backendFetch<T>(
+  event: H3Event,
+  path: string,
+  opts: { method?: Method; body?: Record<string, unknown>; query?: Record<string, unknown> } = {},
+): Promise<T> {
+  const base = backendBase(event)
+  const session = await getUserSession(event)
+  const token = session.secure?.accessToken
+  if (!token) {
+    throw createError({ statusCode: 401, statusMessage: 'No autenticado' })
+  }
+  try {
+    const data = await $fetch(`${base}${path}`, {
+      method: opts.method,
+      body: opts.body,
+      query: opts.query,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    // $fetch infiere TypedInternalResponse; la URL es externa (backend) → casteamos a T.
+    return data as unknown as T
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode ?? 502
+    throw createError({ statusCode: status, statusMessage: 'Error del backend' })
+  }
+}
