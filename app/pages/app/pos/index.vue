@@ -279,17 +279,7 @@ const pad = (n: number): string => String(n).padStart(2, '0')
   letter-spacing: -0.02em; margin: 0; line-height: 1;
 }
 .pos-hdr-actions { display: flex; gap: 8px; }
-.icon-btn {
-  width: 40px; height: 40px; border-radius: 12px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  color: var(--fg2);
-  transition: background var(--dur) var(--ease-standard), color var(--dur) var(--ease-standard);
-}
-.icon-btn:hover { background: var(--crema-200); color: var(--fg1); }
-.icon-btn .iconify { width: 18px; height: 18px; }
+/* .icon-btn viene del global components.css */
 
 .pos-search {
   margin: 0 20px 12px;

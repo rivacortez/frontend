@@ -134,7 +134,7 @@ function pickSort(id: SortId): void {
   <div class="rcp-page">
     <!-- ============ Header ============ -->
     <header class="rcp-hdr">
-      <button class="rcp-back" aria-label="Volver" @click="router.back()">
+      <button class="icon-btn" aria-label="Volver" @click="router.back()">
         <UIcon name="i-lucide-arrow-left" />
       </button>
       <h1 class="rcp-title">
@@ -332,15 +332,7 @@ function pickSort(id: SortId): void {
   align-items: center;
   gap: 8px;
 }
-.rcp-back {
-  width: 40px; height: 40px; border-radius: 12px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--fg1); cursor: pointer;
-}
-.rcp-back:hover { background: var(--crema-100); }
-.rcp-back .iconify { width: 18px; height: 18px; }
+/* .rcp-back → .icon-btn global (components.css) */
 .rcp-title {
   font-family: var(--font-sans);
   font-size: 20px; font-weight: 600; letter-spacing: -0.01em;

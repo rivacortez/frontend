@@ -34,13 +34,14 @@ interface Shortcut {
   sub: string
   to: string
   featured?: boolean
+  soon?: boolean
 }
 
 const shortcuts: Shortcut[] = [
   { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Costos y márgenes', to: '/app/recipes' },
   { icon: 'i-lucide-scan-line', label: 'Escanear factura', sub: 'Magic Upload', to: '/app/data/magic-upload', featured: true },
   { icon: 'i-lucide-shopping-cart', label: 'Compras', sub: 'S/ 380 hoy', to: '/app/stock/shopping-list' },
-  { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'Semana al día', to: '/app/reports' },
+  { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'KPIs y análisis', to: '/app/reports' },
 ]
 
 function notify(message: string): void {
@@ -78,10 +79,9 @@ function notify(message: string): void {
     <section class="section" aria-label="Indicadores de hoy">
       <div class="section-eyebrow">Hoy</div>
       <div class="kpi-rail" role="list">
-        <NuxtLink
+        <div
           role="listitem"
-          class="kpi-card accent"
-          to="/app/reports"
+          class="kpi-card accent kpi-static"
           aria-label="Venta hoy: 2,450 soles, 12% más que ayer"
         >
           <div class="kpi-row-head">
@@ -100,7 +100,7 @@ function notify(message: string): void {
           <div class="kpi-trend">
             <UIcon name="i-lucide-arrow-up-right" /> +12 % vs ayer
           </div>
-        </NuxtLink>
+        </div>
 
         <NuxtLink
           role="listitem"
@@ -239,7 +239,8 @@ function notify(message: string): void {
           :aria-label="`${item.label}. ${item.sub}`"
         >
           <span class="short-ico" aria-hidden="true"><UIcon :name="item.icon" /></span>
-          <span class="short-arrow" aria-hidden="true"><UIcon name="i-lucide-arrow-up-right" /></span>
+          <span v-if="item.soon" class="short-soon">Pronto</span>
+          <span v-else class="short-arrow" aria-hidden="true"><UIcon name="i-lucide-arrow-up-right" /></span>
           <span class="short-label">{{ item.label }}</span>
           <span class="short-sub">{{ item.sub }}</span>
         </NuxtLink>
@@ -310,18 +311,7 @@ function notify(message: string): void {
   70%, 100% { transform: scale(1.8); opacity: 0; }
 }
 .hdr-actions { display: flex; gap: 8px; flex-shrink: 0; padding-top: 4px; }
-.icon-btn {
-  width: 40px; height: 40px; border-radius: 12px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer; position: relative;
-  color: var(--fg2);
-  transition: background var(--dur) var(--ease-standard), color var(--dur) var(--ease-standard);
-}
-.icon-btn:hover { background: var(--crema-200); color: var(--fg1); }
-.icon-btn:active { transform: scale(0.96); }
-.icon-btn .iconify { width: 18px; height: 18px; }
+/* .icon-btn base viene del global components.css; aquí solo el badge del bell */
 .icon-btn .badge {
   position: absolute; top: -4px; right: -4px;
   min-width: 18px; height: 18px; padding: 0 5px;
@@ -381,8 +371,12 @@ function notify(message: string): void {
 }
 .kpi-card:hover { border-color: var(--border); }
 .kpi-card:active { transform: scale(0.98); }
+/* KPI no navegable (métrica informativa, sin destino): sin cues de clickeable */
+.kpi-card.kpi-static { cursor: default; }
+.kpi-card.kpi-static:hover { border-color: var(--border-subtle); }
+.kpi-card.kpi-static:active { transform: none; }
 .kpi-card.accent {
-  background: linear-gradient(140deg, var(--espresso) 0%, #2B2A28 100%);
+  background: linear-gradient(140deg, var(--espresso) 0%, var(--espresso-800) 100%);
   color: var(--crema-100); border-color: transparent;
 }
 .kpi-row-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -492,28 +486,8 @@ function notify(message: string): void {
 }
 .stock-pill .qty { color: var(--fg3); font-family: var(--font-mono); font-size: 10.5px; }
 
-/* ============ Botones del prototipo ============ */
-.btn {
-  font-weight: 600;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 9px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  white-space: nowrap;
-  text-decoration: none;
-  transition: background var(--dur) var(--ease-standard), color var(--dur) var(--ease-standard), transform 80ms;
-  min-height: 36px;
-}
-.btn:active { transform: scale(0.97); }
-.btn-primary { background: var(--terracotta); color: var(--crema-100); }
-.btn-primary:hover { background: var(--terracotta-700); }
-.btn-ghost { background: transparent; color: var(--fg1); border-color: var(--border); }
-.btn-ghost:hover { background: var(--crema-200); }
-.btn-dark { background: var(--espresso); color: var(--crema-100); }
-.btn-dark:hover { background: var(--espresso-800); }
-.btn .iconify { width: 14px; height: 14px; }
+/* Los botones .btn/.btn-primary/.btn-ghost/.btn-dark vienen del global
+   components.css (superset con :disabled, .btn-danger, .btn-lg, .btn-block). */
 
 /* ============ Atajos ============ */
 .short-grid {
@@ -548,8 +522,15 @@ function notify(message: string): void {
 .short-sub { font-size: 12px; color: var(--fg3); margin-top: 2px; }
 .short-arrow { position: absolute; top: 14px; right: 14px; color: var(--fg3); }
 .short-arrow .iconify { width: 14px; height: 14px; }
+.short-soon {
+  position: absolute; top: 12px; right: 12px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--mostaza-800); background: var(--mostaza-50);
+  border: 1px solid var(--mostaza-100);
+  padding: 2px 7px; border-radius: 999px;
+}
 .short.featured {
-  background: linear-gradient(150deg, #FBF8F2 0%, var(--crema-200) 100%);
+  background: linear-gradient(150deg, var(--crema-50) 0%, var(--crema-200) 100%);
   border-color: var(--terracotta-100);
 }
 .short.featured .short-ico { background: var(--terracotta); color: var(--crema-100); }

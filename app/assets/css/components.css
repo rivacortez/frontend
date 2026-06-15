@@ -33,6 +33,20 @@
 .btn-lg { font-size: 15px; min-height: 52px; border-radius: 14px; font-weight: 700; justify-content: center; }
 .btn-block { width: 100%; justify-content: center; }
 
+/* ===== Botón-ícono (back de headers, acciones de barra) ===== */
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 12px;
+  background: var(--pure-white);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg2);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; position: relative; flex-shrink: 0;
+  transition: background var(--dur) var(--ease-standard), color var(--dur) var(--ease-standard);
+}
+.icon-btn:hover { background: var(--crema-200); color: var(--fg1); }
+.icon-btn:active { transform: scale(0.96); }
+.icon-btn .iconify { width: 18px; height: 18px; }
+
 /* ===== Campos de formulario ===== */
 .field-block { margin-bottom: 20px; }
 .field-label {
