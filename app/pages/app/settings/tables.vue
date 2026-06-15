@@ -140,7 +140,9 @@ async function save(): Promise<void> {
   border-radius: 10px;
   padding: 3px;
 }
+.st-zone-stepper button::after { content: ''; position: absolute; inset: -5px; }
 .st-zone-stepper button {
+  position: relative;
   width: 30px; height: 30px; border-radius: 8px;
   background: var(--pure-white);
   border: 1px solid var(--border-subtle);

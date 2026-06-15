@@ -142,7 +142,9 @@ function copyToAll(source: DayHours): void {
 .st-time input:focus { border-color: var(--terracotta); }
 .st-time input:disabled { opacity: 0.6; }
 .st-time-sep { color: var(--fg3); padding-bottom: 10px; }
+.st-copy::after { content: ''; position: absolute; inset: -4px; }
 .st-copy {
+  position: relative;
   width: 32px; height: 36px; border-radius: 10px;
   background: transparent;
   border: 1px solid var(--border);

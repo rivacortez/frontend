@@ -251,7 +251,7 @@ async function save(): Promise<void> {
     <!-- Nota -->
     <section v-if="product && motivo" class="mr-section" aria-label="Nota">
       <div class="mr-label">Nota <span class="hint">opcional</span></div>
-      <input v-model="note" class="field-input" type="text" :placeholder="placeholder" maxlength="120">
+      <input v-model="note" class="field-input" type="text" :placeholder="placeholder" maxlength="120" aria-label="Nota del movimiento">
     </section>
 
     <div class="mr-cta">

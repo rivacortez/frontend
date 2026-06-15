@@ -29,7 +29,7 @@ function next(): void {
     <div class="rs-form">
       <div class="field-block">
         <div class="field-label"><span>Nombre del restaurante</span></div>
-        <input v-model="store.restaurant.name" class="field-input" type="text" placeholder="Ej: Motif Restobar Karaoke">
+        <input v-model="store.restaurant.name" class="field-input" type="text" placeholder="Ej: Motif Restobar Karaoke" aria-label="Nombre del restaurante">
       </div>
 
       <div class="field-block">
@@ -52,7 +52,7 @@ function next(): void {
           <span>Dirección</span>
           <span class="hint">opcional</span>
         </div>
-        <input v-model="store.restaurant.address" class="field-input" type="text" placeholder="Av. Próceres 1532, SJL">
+        <input v-model="store.restaurant.address" class="field-input" type="text" placeholder="Av. Próceres 1532, SJL" aria-label="Dirección">
       </div>
 
       <div class="rs-row">
@@ -61,14 +61,14 @@ function next(): void {
             <span>Teléfono</span>
             <span class="hint">opcional</span>
           </div>
-          <input v-model="store.restaurant.phone" class="field-input" type="tel" placeholder="+51 987 654 321">
+          <input v-model="store.restaurant.phone" class="field-input" type="tel" placeholder="+51 987 654 321" aria-label="Teléfono">
         </div>
         <div class="field-block">
           <div class="field-label">
             <span>RUC</span>
             <span class="hint">opcional</span>
           </div>
-          <input v-model="store.restaurant.ruc" class="field-input" type="text" inputmode="numeric" maxlength="11" placeholder="20…">
+          <input v-model="store.restaurant.ruc" class="field-input" type="text" inputmode="numeric" maxlength="11" placeholder="20…" aria-label="RUC">
         </div>
       </div>
     </div>

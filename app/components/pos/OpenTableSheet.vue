@@ -104,6 +104,7 @@ async function confirm(close: () => void): Promise<void> {
         class="field-input"
         type="text"
         placeholder="Ej: Lucía"
+        aria-label="Mozo asignado"
       >
     </div>
 

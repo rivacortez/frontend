@@ -155,7 +155,7 @@ function onPaid(serie: string, number: number): void {
     <template v-if="table">
       <!-- Header -->
       <header class="md-hdr">
-        <button class="md-back" aria-label="Volver a mesas" @click="handleBack">
+        <button class="icon-btn" aria-label="Volver a mesas" @click="handleBack">
           <UIcon name="i-lucide-arrow-left" />
         </button>
         <div class="md-title-wrap">
@@ -370,17 +370,7 @@ function onPaid(serie: string, number: number): void {
   display: grid; grid-template-columns: 40px 1fr auto; align-items: center;
   gap: 12px;
 }
-.md-back {
-  width: 40px; height: 40px; border-radius: 12px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  color: var(--fg1);
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  transition: background var(--dur) var(--ease-standard);
-}
-.md-back:hover { background: var(--crema-200); }
-.md-back .iconify { width: 18px; height: 18px; }
+/* .md-back → .icon-btn global (components.css) */
 .md-title-wrap { text-align: center; min-width: 0; }
 .md-title {
   font-size: 20px; font-weight: 600;
@@ -537,7 +527,9 @@ function onPaid(serie: string, number: number): void {
   overflow: hidden;
   height: 32px;
 }
+.qty-step button::after { content: ''; position: absolute; inset: -5px; }
 .qty-step button {
+  position: relative;
   width: 30px; height: 30px;
   background: transparent; border: none;
   color: var(--fg2);
@@ -554,7 +546,9 @@ function onPaid(serie: string, number: number): void {
   min-width: 22px;
   text-align: center;
 }
+.md-item-trash::after { content: ''; position: absolute; inset: -5px; }
 .md-item-trash {
+  position: relative;
   width: 30px; height: 30px; border-radius: 50%;
   background: transparent; border: 1px solid var(--border);
   color: var(--fg3);

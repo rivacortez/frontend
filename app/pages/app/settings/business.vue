@@ -50,35 +50,35 @@ async function save(): Promise<void> {
     <section class="st-card">
       <div class="field-block">
         <div class="field-label"><span>Nombre comercial</span></div>
-        <input v-model="form.name" class="field-input" type="text" :disabled="readonly">
+        <input v-model="form.name" class="field-input" type="text" aria-label="Nombre comercial" :disabled="readonly">
       </div>
       <div class="field-block">
         <div class="field-label"><span>Razón social</span></div>
-        <input v-model="form.legalName" class="field-input" type="text" :disabled="readonly">
+        <input v-model="form.legalName" class="field-input" type="text" aria-label="Razón social" :disabled="readonly">
       </div>
       <div class="field-block">
         <div class="field-label"><span>RUC</span></div>
-        <input v-model="form.ruc" class="field-input" type="text" inputmode="numeric" maxlength="11" :disabled="readonly">
+        <input v-model="form.ruc" class="field-input" type="text" inputmode="numeric" maxlength="11" aria-label="RUC" :disabled="readonly">
       </div>
     </section>
 
     <section class="st-card">
       <div class="field-block">
         <div class="field-label"><span>Dirección</span></div>
-        <input v-model="form.address" class="field-input" type="text" :disabled="readonly">
+        <input v-model="form.address" class="field-input" type="text" aria-label="Dirección" :disabled="readonly">
       </div>
       <div class="field-block">
         <div class="field-label"><span>Distrito / Ciudad</span></div>
-        <input v-model="form.district" class="field-input" type="text" :disabled="readonly">
+        <input v-model="form.district" class="field-input" type="text" aria-label="Distrito o ciudad" :disabled="readonly">
       </div>
       <div class="st-row-2">
         <div class="field-block">
           <div class="field-label"><span>Teléfono</span></div>
-          <input v-model="form.phone" class="field-input" type="tel" :disabled="readonly">
+          <input v-model="form.phone" class="field-input" type="tel" aria-label="Teléfono" :disabled="readonly">
         </div>
         <div class="field-block">
           <div class="field-label"><span>Email</span></div>
-          <input v-model="form.email" class="field-input" type="email" :disabled="readonly">
+          <input v-model="form.email" class="field-input" type="email" aria-label="Email" :disabled="readonly">
         </div>
       </div>
     </section>

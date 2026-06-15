@@ -37,11 +37,11 @@ function next(): void {
     <form class="ob-form" novalidate @submit.prevent="next">
       <div class="field-block">
         <div class="field-label"><span>Tu nombre</span></div>
-        <input v-model="store.account.name" class="field-input" type="text" placeholder="Ej: María Quispe" autocomplete="name">
+        <input v-model="store.account.name" class="field-input" type="text" placeholder="Ej: María Quispe" autocomplete="name" aria-label="Tu nombre">
       </div>
       <div class="field-block">
         <div class="field-label"><span>Email</span></div>
-        <input v-model="store.account.email" class="field-input" type="email" placeholder="tu@correo.com" autocomplete="email" inputmode="email">
+        <input v-model="store.account.email" class="field-input" type="email" placeholder="tu@correo.com" autocomplete="email" inputmode="email" aria-label="Email">
         <p v-if="store.account.email && !emailOk" class="ob-field-error">Email no válido</p>
       </div>
       <div class="field-block">
@@ -56,6 +56,7 @@ function next(): void {
             :type="showPassword ? 'text' : 'password'"
             placeholder="Crea una contraseña"
             autocomplete="new-password"
+            aria-label="Contraseña"
           >
           <button
             type="button"

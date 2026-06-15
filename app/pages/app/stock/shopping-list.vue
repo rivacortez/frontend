@@ -266,7 +266,10 @@ function share(): void {
 .sl-item:hover { background: var(--crema-50); }
 .sl-item.done { opacity: 0.6; }
 .sl-item.done .sl-item-name { text-decoration: line-through; }
+/* área de toque ≥40px sin agrandar el control visible */
+.sl-check::after { content: ''; position: absolute; inset: -7px; }
 .sl-check {
+  position: relative;
   width: 26px; height: 26px; border-radius: 8px;
   border: 1.5px solid var(--border);
   background: transparent;

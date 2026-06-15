@@ -1,7 +1,7 @@
 /* ============================================================
    GastronomIA — Theme Nuxt UI / Tailwind v4
    Paleta cálida bistró: terracota, crema, espresso
-   Fuente de verdad visual: gastronomia-v2/project/colors_and_type.css
+   Tokens portados del diseño en Claude Design (claude.ai/design); consolidados aquí
    ============================================================ */
 
 @import "tailwindcss";
@@ -206,6 +206,17 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Foco de teclado global: sin esto, botones/chips/tarjetas hechos a mano no
+   tenían ningún indicador y los usuarios de teclado quedaban perdidos.
+   Solo aplica a navegación por teclado (no al click/touch). */
+:focus-visible {
+  outline: 2px solid var(--terracotta);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Los inputs ya muestran su propio anillo (.field-input:focus); evita el doble borde */
+.field-input:focus-visible { outline: none; }
 
 @layer components {
   /* Titulares editoriales: Lora italic */
