@@ -3,7 +3,8 @@ export interface ApiResponse<T> {
   success: boolean
   data: T
   error?: { code: string, message: string }
-  meta?: { totalCount: number, page: number }
+  /** `unreadCount` solo lo trae la bandeja de notificaciones (E10) — es el badge de la campana. */
+  meta?: { totalCount: number, page: number, unreadCount?: number }
 }
 
 export type AppRole = 'owner' | 'manager' | 'staff'

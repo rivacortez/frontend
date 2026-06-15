@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { AppNotification, NotificationKind } from '#shared/types/domain'
+import type { NotificationType } from '~/composables/use-notifications'
 
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Notificaciones — GastronomIA' })
 
 const { data: notifications } = useNotifications()
-const markRead = useMarkNotificationsRead()
+const markRead = useMarkRead()
+const markAllRead = useMarkAllRead()
 
 const KIND_META: Record<NotificationKind, { icon: string, cls: string }> = {
   critical: { icon: 'i-lucide-alert-triangle', cls: 'critical' },
@@ -24,7 +26,35 @@ async function open(n: AppNotification): Promise<void> {
 }
 
 async function markAll(): Promise<void> {
-  await markRead.mutateAsync(undefined)
+  await markAllRead.mutateAsync()
+}
+
+// ---- HU-10-03 · Preferencias (canal in-app por tipo) ----
+const showPrefs = ref(false)
+const { data: prefRows } = useNotificationPreferences()
+const setPreference = useSetPreference()
+const toast = useToast()
+
+const PREF_TYPES: { type: NotificationType, label: string, sub: string }[] = [
+  { type: 'low_stock', label: 'Stock crítico', sub: 'Insumos bajo el mínimo de reorden' },
+  { type: 'bill_requested', label: 'Cuenta solicitada', sub: 'Una mesa pidió la cuenta' },
+  { type: 'order_ready', label: 'Pedido listo', sub: 'Cocina marcó un plato como listo' },
+  { type: 'system', label: 'Sistema y recomendaciones', sub: 'Reportes, alertas IA y avisos generales' },
+]
+
+// El backend solo persiste las preferencias modificadas; ausencia = default in-app activo.
+function inAppEnabled(type: NotificationType): boolean {
+  const row = (prefRows.value ?? []).find(p => p.type === type)
+  return row ? row.inApp : true
+}
+
+async function toggleInApp(type: NotificationType, value: boolean): Promise<void> {
+  try {
+    await setPreference.mutateAsync({ type, inApp: value })
+  }
+  catch (error) {
+    toast.add({ title: errorMessage(error, 'No se pudo guardar la preferencia'), color: 'error', icon: 'i-lucide-alert-circle' })
+  }
 }
 </script>
 
@@ -42,8 +72,35 @@ async function markAll(): Promise<void> {
         >
           Marcar leídas
         </UButton>
+        <UButton
+          size="sm"
+          color="neutral"
+          :variant="showPrefs ? 'solid' : 'ghost'"
+          icon="i-lucide-settings-2"
+          aria-label="Preferencias de notificaciones"
+          :aria-pressed="showPrefs"
+          @click="showPrefs = !showPrefs"
+        />
       </template>
     </UiScreenHeader>
+
+    <section v-if="showPrefs" class="ntf-section ntf-prefs">
+      <div class="eyebrow ntf-eyebrow">Preferencias · en la app</div>
+      <div class="ntf-prefs-card">
+        <label v-for="p in PREF_TYPES" :key="p.type" class="ntf-pref-row">
+          <span class="ntf-pref-body">
+            <span class="ntf-pref-label">{{ p.label }}</span>
+            <span class="ntf-pref-sub">{{ p.sub }}</span>
+          </span>
+          <USwitch
+            :model-value="inAppEnabled(p.type)"
+            :disabled="setPreference.isLoading.value"
+            @update:model-value="(v: boolean) => toggleInApp(p.type, v)"
+          />
+        </label>
+        <p class="ntf-prefs-note">El aviso por correo llegará en una próxima versión.</p>
+      </div>
+    </section>
 
     <template v-if="all.length">
       <section v-if="unread.length" class="ntf-section">
@@ -168,5 +225,26 @@ async function markAll(): Promise<void> {
 .ntf-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--terracotta);
+}
+
+/* ---- Preferencias (canal in-app por tipo) ---- */
+.ntf-prefs-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--pure-white);
+  overflow: hidden;
+}
+.ntf-pref-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.ntf-pref-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ntf-pref-label { font-size: 13.5px; font-weight: 600; color: var(--fg1); }
+.ntf-pref-sub { font-size: 12px; color: var(--fg3); line-height: 1.4; }
+.ntf-prefs-note {
+  padding: 11px 14px;
+  font-size: 11.5px; color: var(--fg3);
 }
 </style>

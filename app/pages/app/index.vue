@@ -4,8 +4,9 @@ useSeoMeta({ title: 'Inicio — GastronomIA' })
 
 const { user } = useUserSession()
 const toast = useToast()
-const { data: notifications } = useNotifications()
-const unreadCount = computed(() => (notifications.value ?? []).filter(n => !n.read).length)
+// Badge de la campana: contador AUTORITATIVO del backend (cuenta todas las no leídas, E10).
+const { data: unread } = useUnreadCount()
+const unreadCount = computed(() => unread.value ?? 0)
 
 const firstName = computed(() => user.value?.name.split(' ')[0] ?? '')
 

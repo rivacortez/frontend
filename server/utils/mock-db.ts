@@ -1,5 +1,4 @@
 import type {
-  AppNotification,
   AppSettings,
   ChatMessage,
   DiningTable,
@@ -26,7 +25,6 @@ export interface MockDb {
   sales: Sale[]
   movements: InventoryMovement[]
   shoppingList: ShoppingItem[]
-  notifications: AppNotification[]
   settings: AppSettings
   chatHistory: ChatMessage[]
   ingestions: Ingestion[]
@@ -321,15 +319,6 @@ function seed(): MockDb {
     { id: 'shop-5', ingredientId: 'ing-19', name: 'Queso Fresco', suggestedQty: 2, unit: 'kg', estimatedCost: 36, reason: 'Consumo proyectado huancaína', urgent: false, checked: true },
   ]
 
-  const notifications: AppNotification[] = [
-    { id: 'not-1', kind: 'critical', title: 'Margen en riesgo: Ceviche Clásico', body: 'Limón Sutil subió 30 % esta semana. El margen bajó de 26 % a 18 %.', date: iso(0.5 * HOUR), read: false, actionLabel: 'Ver receta', actionTo: '/app/recipes/rec-ceviche-clasico' },
-    { id: 'not-2', kind: 'warning', title: 'Stock crítico: 3 insumos', body: 'Limón Sutil, Aceite de Oliva y Cilantro están por debajo del umbral.', date: iso(1 * HOUR), read: false, actionLabel: 'Lista de compra', actionTo: '/app/stock/shopping-list' },
-    { id: 'not-3', kind: 'info', title: 'Recomendación: Bebidas del día', body: '3 cocteles con margen ≥ 65 % y stock alto. Activarlos puede sumar ~ S/ 280.', date: iso(2 * HOUR), read: false },
-    { id: 'not-4', kind: 'success', title: 'Conteo de inventario completado', body: 'Varianza total: −S/ 23.40 (0.8 %). Dentro del rango esperado.', date: iso(26 * HOUR), read: true },
-    { id: 'not-5', kind: 'info', title: 'Reporte semanal listo', body: 'Tu resumen del 1 al 7 de junio está disponible.', date: iso(50 * HOUR), read: true },
-    { id: 'not-6', kind: 'warning', title: 'Mesa 18 lleva 25 min con cuenta pedida', body: 'El cobro está pendiente desde las 19:40.', date: iso(72 * HOUR), read: true },
-  ]
-
   const settings: AppSettings = {
     business: {
       name: 'Motif Restobar Karaoke',
@@ -372,7 +361,6 @@ function seed(): MockDb {
     sales,
     movements,
     shoppingList,
-    notifications,
     settings,
     chatHistory: [],
     ingestions: [],
@@ -395,6 +383,6 @@ export function nextId(db: MockDb, prefix: string): string {
 }
 
 /** Sobre estándar de respuesta (frontend_context.md §6). */
-export function ok<T>(data: T, meta?: { totalCount: number, page: number }): { success: true, data: T, meta?: { totalCount: number, page: number } } {
+export function ok<T>(data: T, meta?: { totalCount: number, page: number, unreadCount?: number }): { success: true, data: T, meta?: { totalCount: number, page: number, unreadCount?: number } } {
   return { success: true, data, ...(meta ? { meta } : {}) }
 }
