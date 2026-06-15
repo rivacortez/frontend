@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { DiningTable, Order } from '#shared/types/domain'
+import type { ApiResponse } from '#shared/types/api'
+import type { DiningTable, Order, PreBill } from '#shared/types/domain'
 
 const props = defineProps<{
   table: DiningTable
@@ -62,8 +63,23 @@ async function handleAction(action: MesaAction, close: () => void): Promise<void
       emit('discount')
       break
     case 'pre-cuenta':
-      await patchTable.mutateAsync({ id: props.table.id, status: 'bill' })
-      toast.add({ title: 'Pre-cuenta enviada a impresora', icon: 'i-lucide-printer' })
+      // HU-04-01: la pre-cuenta usa los totales AUTORITATIVOS del backend
+      // (GET /api/orders/:id/pre-bill, preview que no persiste) y marca la mesa
+      // como "pedir cuenta". El monto mostrado sale del backend, no del cálculo local.
+      try {
+        if (props.order) {
+          const { data: preBill } = await $fetch<ApiResponse<PreBill>>(`/api/orders/${props.order.id}/pre-bill`)
+          await patchTable.mutateAsync({ id: props.table.id, status: 'bill' })
+          toast.add({ title: `Pre-cuenta · ${formatPEN(Number(preBill.total))}`, description: 'Enviada a impresora (IGV incluido).', icon: 'i-lucide-printer' })
+        }
+        else {
+          await patchTable.mutateAsync({ id: props.table.id, status: 'bill' })
+          toast.add({ title: 'Pre-cuenta enviada a impresora', icon: 'i-lucide-printer' })
+        }
+      }
+      catch (err) {
+        toast.add({ title: 'No se pudo generar la pre-cuenta', description: errorMessage(err, 'Intenta de nuevo.'), icon: 'i-lucide-alert-triangle', color: 'error' })
+      }
       break
     case 'dividir':
       await navigateTo(`/app/pos/mesa/${props.table.id}/split`)

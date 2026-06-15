@@ -1,5 +1,5 @@
 import type { H3Event } from 'h3'
-import type { DiningTable, Order, OrderItem, TableStatus } from '#shared/types/domain'
+import type { DiningTable, Order, OrderItem, PaymentMethod, Sale, SaleDocType, SaleStatus, TableStatus } from '#shared/types/domain'
 import { backendFetch } from './backend'
 
 /**
@@ -11,8 +11,13 @@ import { backendFetch } from './backend'
  * Mapas clave:
  *  - recipeId ⇄ menuItemId vía `/api/menu/items` (el frontend trabaja con la
  *    "receta = plato vendible"; el backend toma órdenes por `menuItemId`).
- *  - pagos (payments) y descuento (discount) pertenecen a E04 (billing) → aún
- *    no existen en el backend; se devuelven vacíos/ignorados.
+ *  - descuento (discount) aún no existe en el backend → se ignora.
+ *
+ * E04 (cobros) — ya integrado: `pay` (POST /api/orders/:id/pay → {order, sale}),
+ * `listSales`/`getSale`/`voidSale` (GET/POST /api/sales), y los passthrough de
+ * `preBill` (GET /api/orders/:id/pre-bill) y `splitOrder` (POST /api/orders/:id/split).
+ * El backend devuelve `SaleView` con moneda string → `toFrontendSale` la traduce
+ * al `Sale` del frontend (números).
  */
 
 interface Envelope<T> { success: boolean, data: T }
@@ -59,6 +64,48 @@ interface BeMenuItem {
   price: string
 }
 interface BeTableDetail { table: BeTableView, order: BeOrderView | null }
+
+// ---- Formas E04 (billing) del backend ----
+interface BeSaleItemView {
+  name: string
+  qty: number
+  unitPrice: string
+  total: string
+}
+interface BeSaleView {
+  id: string
+  orderId: string
+  serie: string
+  number: number
+  docType: string
+  customer: string | null
+  customerDoc: string | null
+  date: string
+  tableLabel: string
+  items: BeSaleItemView[]
+  subtotal: string
+  igv: string
+  total: string
+  method: string
+  payments: { method: string, amount: string }[]
+  status: string
+}
+interface BePreBillItem { name: string, qty: number, unitPrice: string, lineTotal: string }
+export interface BePreBillView {
+  orderId: string
+  tableCode: string
+  items: BePreBillItem[]
+  subtotal: string
+  igv: string
+  total: string
+}
+export interface BeSplitShare { label: string, subtotal: string, igv: string, total: string }
+export interface BeSplitView {
+  orderId: string
+  mode: 'equal' | 'items'
+  shares: BeSplitShare[]
+  total: string
+}
 
 const num = (s: string | null | undefined): number => (s == null ? 0 : Number(s))
 
@@ -144,6 +191,45 @@ function toOrder(o: BeOrderView, recipeByItem: Map<string, string>): Order {
     discount: undefined,
     payments: [],
     status: toOrderStatus(o.status),
+  }
+}
+
+// ---- SaleView → Sale (E04) ----
+const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'card', 'yape', 'plin']
+function toPaymentMethod(m: string): PaymentMethod {
+  return (PAYMENT_METHODS as string[]).includes(m) ? (m as PaymentMethod) : 'cash'
+}
+function toSaleDocType(d: string): SaleDocType {
+  return d === 'factura' ? 'factura' : 'boleta'
+}
+function toSaleStatus(s: string): SaleStatus {
+  return s === 'void' ? 'void' : 'issued'
+}
+
+// El `Sale` del frontend es casi idéntico al `SaleView` del backend; la única
+// traducción real es moneda string → number y la coerción de los enums.
+export function toFrontendSale(s: BeSaleView): Sale {
+  return {
+    id: s.id,
+    serie: s.serie,
+    number: s.number,
+    docType: toSaleDocType(s.docType),
+    date: s.date,
+    // El backend siempre manda tableLabel (string, "" si no hay mesa) → undefined si vacío.
+    tableLabel: s.tableLabel || undefined,
+    customer: s.customer ?? undefined,
+    customerDoc: s.customerDoc ?? undefined,
+    items: s.items.map(it => ({
+      name: it.name,
+      qty: it.qty,
+      unitPrice: num(it.unitPrice),
+      total: num(it.total),
+    })),
+    subtotal: num(s.subtotal),
+    igv: num(s.igv),
+    total: num(s.total),
+    method: toPaymentMethod(s.method),
+    status: toSaleStatus(s.status),
   }
 }
 
@@ -297,4 +383,79 @@ export async function sendOrderToKitchen(event: H3Event, orderId: string): Promi
     fetchMenuMaps(event),
   ])
   return toOrder(res.data, maps.recipeByItem)
+}
+
+// ---- E04 · Cobrar (HU-04-02/04/05/06): POST /api/orders/:id/pay → {order, sale} ----
+export interface PayOrderBody {
+  payments: { method: PaymentMethod, amount: number }[]
+  docType?: SaleDocType
+  customer?: string
+  customerDoc?: string
+}
+export async function payOrder(
+  event: H3Event,
+  orderId: string,
+  body: PayOrderBody,
+): Promise<{ order: Order, sale: Sale }> {
+  // El total/IGV los calcula el backend desde los ítems vivos; el body solo trae
+  // pagos (≥1, monto > 0) + datos del comprobante. 400 si Σpagos < total; 409 si ya pagada.
+  const [res, maps] = await Promise.all([
+    backendFetch<Envelope<{ order: BeOrderView, sale: BeSaleView }>>(event, `/api/orders/${orderId}/pay`, {
+      method: 'POST',
+      body: { ...body },
+    }),
+    fetchMenuMaps(event),
+  ])
+  return {
+    order: toOrder(res.data.order, maps.recipeByItem),
+    sale: toFrontendSale(res.data.sale),
+  }
+}
+
+// ---- E04 · Comprobantes: GET /api/sales (lista) ----
+export async function listSales(event: H3Event): Promise<Sale[]> {
+  const res = await backendFetch<Envelope<BeSaleView[]>>(event, '/api/sales')
+  return res.data.map(toFrontendSale)
+}
+
+// ---- E04 · Comprobante por id: GET /api/sales/:id ----
+export async function getSale(event: H3Event, id: string): Promise<Sale> {
+  const res = await backendFetch<Envelope<BeSaleView>>(event, `/api/sales/${id}`)
+  return toFrontendSale(res.data)
+}
+
+// ---- E04 · Anular ticket (HU-04-07): POST /api/sales/:id/void {reason} ----
+// El backend exige manager/owner (CASL 'update' 'Sale') → staff recibe 403.
+export async function voidSale(event: H3Event, id: string, reason: string): Promise<Sale> {
+  const res = await backendFetch<Envelope<BeSaleView>>(event, `/api/sales/${id}/void`, {
+    method: 'POST',
+    body: { reason },
+  })
+  return toFrontendSale(res.data)
+}
+
+// ---- E04 · Pre-cuenta (HU-04-01): GET /api/orders/:id/pre-bill ----
+// Passthrough de los totales autoritativos del backend (preview, no persiste).
+export async function getPreBill(event: H3Event, orderId: string): Promise<BePreBillView> {
+  const res = await backendFetch<Envelope<BePreBillView>>(event, `/api/orders/${orderId}/pre-bill`)
+  return res.data
+}
+
+// ---- E04 · Dividir cuenta (HU-04-03): POST /api/orders/:id/split ----
+// Passthrough del cómputo de partes del backend (display, no persiste).
+export interface SplitOrderBody {
+  mode: 'equal' | 'items'
+  parts?: number
+  assignments?: { label: string, itemIds: string[] }[]
+}
+export async function splitOrder(
+  event: H3Event,
+  orderId: string,
+  body: SplitOrderBody,
+): Promise<BeSplitView> {
+  const res = await backendFetch<Envelope<BeSplitView>>(event, `/api/orders/${orderId}/split`, {
+    method: 'POST',
+    body: { ...body },
+  })
+  return res.data
 }

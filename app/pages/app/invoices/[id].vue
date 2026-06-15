@@ -2,10 +2,39 @@
 definePageMeta({ layout: 'app' })
 
 const route = useRoute()
-const { data: sale } = useSale(() => String(route.params.id))
+const { data: sale, refresh } = useSale(() => String(route.params.id))
 const toast = useToast()
+const { user } = useUserSession()
+const voidSale = useVoidSale()
 
 useSeoMeta({ title: () => sale.value ? `${sale.value.serie}-${sale.value.number} — GastronomIA` : 'Comprobante — GastronomIA' })
+
+// HU-04-07 · Anular comprobante (manager/owner). El backend exige razón y rol
+// (CASL 'update' 'Sale'); staff no ve el botón (y el BFF igual devolvería 403).
+const canVoid = computed(() =>
+  !!sale.value && sale.value.status === 'issued'
+  && (user.value?.role === 'owner' || user.value?.role === 'manager'),
+)
+const voidConfirm = ref(false)
+const voidReason = ref('')
+const voiding = ref(false)
+
+async function confirmVoid(): Promise<void> {
+  if (!sale.value || !voidReason.value.trim() || voiding.value) return
+  voiding.value = true
+  try {
+    await voidSale.mutateAsync({ id: sale.value.id, reason: voidReason.value.trim() })
+    voidConfirm.value = false
+    toast.add({ title: 'Comprobante anulado', icon: 'i-lucide-ban' })
+    await refresh()
+  }
+  catch (err) {
+    toast.add({ title: 'No se pudo anular', description: errorMessage(err, 'Intenta de nuevo.'), icon: 'i-lucide-alert-triangle', color: 'error' })
+  }
+  finally {
+    voiding.value = false
+  }
+}
 
 const dateLabel = computed(() => {
   if (!sale.value) return ''
@@ -97,6 +126,11 @@ function print(): void {
           <UIcon name="i-lucide-send" /> Enviar al cliente
         </button>
       </div>
+
+      <!-- Anular (HU-04-07, solo manager/owner y si está emitido) -->
+      <button v-if="canVoid" class="ivd-void-btn" @click="voidReason = ''; voidConfirm = true">
+        <UIcon name="i-lucide-ban" /> Anular comprobante
+      </button>
     </template>
 
     <UiEmptyState
@@ -107,6 +141,31 @@ function print(): void {
     >
       <UButton to="/app/invoices" variant="outline" color="neutral" icon="i-lucide-arrow-left">Volver</UButton>
     </UiEmptyState>
+
+    <!-- Confirmación de anulación -->
+    <Teleport to="body">
+      <div v-if="voidConfirm" class="ivd-modal-overlay" role="presentation" @click="voidConfirm = false">
+        <div class="ivd-modal" role="alertdialog" aria-modal="true" aria-label="Anular comprobante" @click.stop>
+          <div class="ivd-modal-ico" aria-hidden="true"><UIcon name="i-lucide-ban" /></div>
+          <h3 class="ivd-modal-title">Anular {{ sale?.serie }}-{{ sale?.number }}</h3>
+          <p class="ivd-modal-text">El comprobante quedará marcado como anulado. Indica el motivo — quedará registrado para auditoría.</p>
+          <textarea
+            v-model="voidReason"
+            class="ivd-modal-textarea"
+            placeholder="Motivo de la anulación…"
+            aria-label="Motivo de la anulación"
+            maxlength="140"
+          />
+          <div class="ivd-modal-actions">
+            <button class="btn btn-danger btn-lg btn-block" :disabled="!voidReason.trim() || voiding" @click="confirmVoid">
+              <UIcon :name="voiding ? 'i-lucide-loader-2' : 'i-lucide-ban'" :class="{ spin: voiding }" />
+              {{ voiding ? 'Anulando…' : 'Sí, anular' }}
+            </button>
+            <button class="btn btn-ghost btn-block" @click="voidConfirm = false">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -214,4 +273,69 @@ function print(): void {
   padding: 0 20px;
 }
 .ivd-actions .btn { min-height: 48px; border-radius: 12px; justify-content: center; font-size: 14px; }
+
+.ivd-void-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 12px 20px 0;
+  width: calc(100% - 40px);
+  background: transparent;
+  border: 1px solid var(--danger-bg);
+  color: var(--danger);
+  font: inherit; font-size: 13px; font-weight: 600;
+  min-height: 44px; border-radius: 12px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease-standard);
+}
+.ivd-void-btn:hover { background: var(--danger-bg); }
+.ivd-void-btn .iconify { width: 15px; height: 15px; }
+</style>
+
+<style>
+/* Modal de anulación teleportado a body (sin scope) */
+.ivd-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(26, 26, 26, 0.55);
+  z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  animation: ivdFade 200ms ease;
+}
+@keyframes ivdFade { from { opacity: 0; } to { opacity: 1; } }
+.ivd-modal {
+  background: var(--pure-white);
+  border-radius: 16px;
+  padding: 22px 20px 18px;
+  width: 100%;
+  max-width: 340px;
+  text-align: left;
+  animation: ivdModalIn 280ms var(--ease-emphasis);
+}
+@keyframes ivdModalIn {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.ivd-modal-ico {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: var(--danger-bg); color: var(--danger);
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 12px;
+}
+.ivd-modal-ico .iconify { width: 22px; height: 22px; }
+.ivd-modal-title { font-size: 17px; font-weight: 600; color: var(--fg1); letter-spacing: -0.01em; margin: 0 0 6px; }
+.ivd-modal-text { font-size: 13.5px; line-height: 1.45; color: var(--fg2); margin: 0 0 12px; }
+.ivd-modal-textarea {
+  width: 100%; min-height: 64px; resize: none;
+  background: var(--pure-white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit; font-size: 13.5px; color: var(--fg1);
+  outline: none;
+  margin-bottom: 14px;
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+.ivd-modal-textarea:focus { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(179, 58, 42, 0.16); }
+.ivd-modal-actions { display: flex; flex-direction: column; gap: 8px; }
+.ivd-modal .spin { animation: ivdSpin 0.9s linear infinite; }
+@keyframes ivdSpin { to { transform: rotate(360deg); } }
 </style>

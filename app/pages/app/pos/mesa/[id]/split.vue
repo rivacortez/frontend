@@ -7,6 +7,7 @@ const route = useRoute()
 const tableId = computed(() => String(route.params.id))
 const { data } = useTable(tableId)
 const payOrder = usePayOrder()
+const splitOrder = useSplitOrder()
 
 const table = computed(() => data.value?.table ?? null)
 const order = computed(() => data.value?.order ?? null)
@@ -33,7 +34,59 @@ const CUENTAS = ['A', 'B', 'C'] as const
 const assignment = ref<Record<string, string>>({})
 const paidCuentas = ref<string[]>([])
 
-const perPerson = computed(() => totals.value.total / persons.value)
+// HU-04-03 · Montos AUTORITATIVOS del backend (POST /api/orders/:id/split, no persiste).
+// El reparto local (total/personas, Σítems por cuenta) se usa solo como fallback
+// inmediato mientras llega la respuesta; el cobro usa siempre los montos del backend.
+const personShares = ref<number[]>([]) // por persona: total de cada parte (índice = persona)
+const cuentaShares = ref<Record<string, number>>({}) // por cuenta: total autoritativo
+
+// Por persona: pide al backend `equal` con `parts = personas` cuando cambia el número.
+watch([mode, persons, order], async () => {
+  if (mode.value !== 'persona' || !order.value || paidShares.value.length > 0) return
+  try {
+    const res = await splitOrder.mutateAsync({ orderId: order.value.id, mode: 'equal', parts: persons.value })
+    personShares.value = res.shares.map(s => Number(s.total))
+  }
+  catch {
+    personShares.value = [] // fallback al reparto local
+  }
+}, { immediate: true })
+
+// Por items: cuando TODOS los ítems están asignados, pide al backend `items` con
+// las asignaciones reales (label = "Cuenta X", itemIds). El backend exige que cada
+// ítem vivo esté asignado exactamente una vez → solo se llama con asignación completa.
+watch([mode, assignment, order], async () => {
+  if (mode.value !== 'items' || !order.value) return
+  const items = order.value.items
+  if (items.length === 0 || items.some(it => !assignment.value[it.id])) {
+    cuentaShares.value = {}
+    return
+  }
+  const activeCuentas = CUENTAS.filter(c => items.some(it => assignment.value[it.id] === c))
+  const assignments = activeCuentas.map(c => ({
+    label: `Cuenta ${c}`,
+    itemIds: items.filter(it => assignment.value[it.id] === c).map(it => it.id),
+  }))
+  try {
+    const res = await splitOrder.mutateAsync({ orderId: order.value.id, mode: 'items', assignments })
+    const next: Record<string, number> = {}
+    for (const share of res.shares) {
+      const cuenta = share.label.replace('Cuenta ', '')
+      next[cuenta] = Number(share.total)
+    }
+    cuentaShares.value = next
+  }
+  catch {
+    cuentaShares.value = {} // fallback al reparto local por cuenta
+  }
+}, { deep: true, immediate: true })
+
+// Monto por persona: backend si está disponible, si no el reparto local equitativo.
+const perPerson = computed(() => personShares.value[0] ?? (totals.value.total / persons.value))
+function personAmount(index: number): number {
+  const fromBackend = personShares.value[index]
+  return fromBackend ?? +(totals.value.total / persons.value).toFixed(2)
+}
 
 const cobrarTarget = ref<{ label: string, amount: number, key: string } | null>(null)
 const cobrarMethod = ref<PaymentMethod | null>(null)
@@ -42,7 +95,7 @@ function openCobrarPersona(index: number): void {
   cobrarMethod.value = null
   cobrarTarget.value = {
     label: `Persona ${index + 1} de ${persons.value}`,
-    amount: +perPerson.value.toFixed(2),
+    amount: +personAmount(index).toFixed(2),
     key: `p${index}`,
   }
 }
@@ -53,9 +106,15 @@ const cuentaTotals = computed(() => {
   for (const item of order.value?.items ?? []) {
     const cuenta = assignment.value[item.id]
     if (cuenta && out[cuenta]) {
-      out[cuenta].total += item.qty * item.unitPrice
+      // Conteo siempre local; el total prefiere el monto autoritativo del backend.
       out[cuenta].count += item.qty
+      out[cuenta].total += item.qty * item.unitPrice
     }
+  }
+  // Reemplaza el total local por el del backend cuando exista (asignación completa).
+  for (const c of CUENTAS) {
+    const fromBackend = cuentaShares.value[c]
+    if (fromBackend !== undefined && out[c]) out[c].total = fromBackend
   }
   return out
 })
@@ -159,7 +218,7 @@ const pad = (n: number | undefined): string => String(n ?? '').padStart(2, '0')
             <span class="sb-share-avatar">{{ i }}</span>
             <span class="sb-share-body">
               <span class="sb-share-name">Persona {{ i }}</span>
-              <span class="sb-share-amount">{{ formatPEN(perPerson) }}</span>
+              <span class="sb-share-amount">{{ formatPEN(personAmount(i - 1)) }}</span>
             </span>
             <span v-if="paidShares.includes(i - 1)" class="sb-share-paid">
               <UIcon name="i-lucide-check-circle-2" /> Pagado

@@ -134,6 +134,39 @@ export interface Sale {
   status: SaleStatus
 }
 
+// HU-04-01 · Pre-cuenta (preview, no persiste). Totales autoritativos del backend
+// (moneda string, igual que `SaleView`). El frontend solo los muestra.
+export interface PreBillLine {
+  name: string
+  qty: number
+  unitPrice: string
+  lineTotal: string
+}
+
+export interface PreBill {
+  orderId: string
+  tableCode: string
+  items: PreBillLine[]
+  subtotal: string
+  igv: string
+  total: string
+}
+
+// HU-04-03 · División de la cuenta (cómputo de display, no persiste).
+export interface SplitShare {
+  label: string
+  subtotal: string
+  igv: string
+  total: string
+}
+
+export interface SplitResult {
+  orderId: string
+  mode: 'equal' | 'items'
+  shares: SplitShare[]
+  total: string
+}
+
 // ===== Inventario =====
 
 export type MovementType = 'purchase' | 'sale' | 'waste' | 'adjustment' | 'count'
