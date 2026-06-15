@@ -14,7 +14,6 @@ const SCREENS: Record<string, UpcomingScreen> = {
   stock: { title: 'Inventario', sub: 'Stock, movimientos y conteos', icon: 'i-lucide-package', epic: 'Sprint 3 · E05' },
   chat: { title: 'Chat analítico', sub: 'Pregúntale a tus ventas en español', icon: 'i-lucide-bot', epic: 'Sprint 5 · E09' },
   recipes: { title: 'Recetas', sub: 'Catálogo, costos y márgenes', icon: 'i-lucide-utensils', epic: 'Sprint 1 · E02' },
-  reports: { title: 'Reportes', sub: 'KPIs y análisis semanal', icon: 'i-lucide-bar-chart-3', epic: 'Sprint 4 · E07' },
   invoices: { title: 'Comprobantes', sub: 'Ventas y tickets emitidos', icon: 'i-lucide-receipt', epic: 'Sprint 2 · E04' },
   data: { title: 'Datos', sub: 'Importación y exportación', icon: 'i-lucide-upload', epic: 'Sprint 1 · E11' },
   settings: { title: 'Ajustes del negocio', sub: 'Horarios, mesas, impuestos, pagos', icon: 'i-lucide-settings', epic: 'Sprint 1 · E01' },

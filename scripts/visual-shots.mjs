@@ -35,6 +35,7 @@ function findChromium() {
 /** Rutas de la app (requieren sesión). */
 const APP_ROUTES = [
   ['app-home', '/app'],
+  ['reports', '/app/reports'],
   ['pos-mesas', '/app/pos'],
   ['pos-mesa-detalle', '/app/pos/mesa/mesa-1'],
   ['pos-split', '/app/pos/mesa/mesa-3/split'],
@@ -73,6 +74,7 @@ const PUBLIC_ROUTES = [
 
 const DESKTOP_ROUTES = [
   ['app-home', '/app'],
+  ['reports', '/app/reports'],
   ['pos-mesas', '/app/pos'],
   ['recipes-list', '/app/recipes'],
   ['chat', '/app/chat'],

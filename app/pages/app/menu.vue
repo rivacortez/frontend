@@ -9,6 +9,7 @@ interface MenuEntry {
   label: string
   sub: string
   to: string
+  soon?: boolean
 }
 
 interface MenuGroup {
@@ -86,6 +87,7 @@ const initials = computed(() =>
             <span class="menu-label">{{ entry.label }}</span>
             <span class="menu-sub">{{ entry.sub }}</span>
           </span>
+          <span v-if="entry.soon" class="menu-soon">Pronto</span>
           <UIcon name="i-lucide-chevron-right" class="menu-chevron" aria-hidden="true" />
         </NuxtLink>
       </div>
@@ -173,6 +175,12 @@ const initials = computed(() =>
 .menu-label { font-size: 14px; font-weight: 600; color: var(--fg1); }
 .menu-sub { font-size: 12px; color: var(--fg3); }
 .menu-chevron { width: 16px; height: 16px; color: var(--fg3); flex-shrink: 0; }
+.menu-soon {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--mostaza-800); background: var(--mostaza-50);
+  border: 1px solid var(--mostaza-100);
+  padding: 2px 7px; border-radius: 999px; flex-shrink: 0;
+}
 .menu-logout { margin-top: 8px; }
 .capitalize { text-transform: capitalize; }
 </style>
