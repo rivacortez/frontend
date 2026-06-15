@@ -45,3 +45,15 @@ export function usePatchShoppingItem() {
     onSettled: () => cache.invalidateQueries({ key: ['shopping-list'] }),
   })
 }
+
+export function useAddShoppingItem() {
+  const cache = useQueryCache()
+  return useMutation({
+    mutation: (payload: { ingredientId: string, suggestedQty?: number }) =>
+      $fetch<ApiResponse<ShoppingItem>>('/api/inventory/shopping-list', {
+        method: 'POST',
+        body: payload,
+      }).then(r => r.data),
+    onSettled: () => cache.invalidateQueries({ key: ['shopping-list'] }),
+  })
+}

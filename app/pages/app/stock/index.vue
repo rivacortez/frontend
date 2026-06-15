@@ -10,7 +10,10 @@ const toast = useToast()
 
 const query = ref('')
 const cat = ref('Todos')
-const ordered = ref<string[]>([])
+
+const { mutateAsync: addShopping } = useAddShoppingItem()
+// Estado real: qué insumos ya están en la Lista de Compras (no un toggle local).
+const inShopping = computed(() => new Set((shopping.value ?? []).map(s => s.ingredientId)))
 
 type StockStatus = 'ok' | 'low' | 'crit'
 
@@ -93,12 +96,12 @@ function fmtMin(i: Ingredient): string {
   return `${i.minStock} ${i.unit}`
 }
 
-function orderItem(i: Ingredient): void {
-  if (ordered.value.includes(i.id)) {
-    ordered.value = ordered.value.filter(id => id !== i.id)
+async function orderItem(i: Ingredient): Promise<void> {
+  if (inShopping.value.has(i.id)) {
+    toast.add({ title: `${i.name} ya está en la Lista de Compras`, icon: 'i-lucide-info' })
     return
   }
-  ordered.value.push(i.id)
+  await addShopping({ ingredientId: i.id })
   toast.add({ title: `${i.name} agregado a Lista de Compras`, icon: 'i-lucide-check-circle-2' })
 }
 </script>
@@ -219,11 +222,11 @@ function orderItem(i: Ingredient): void {
           </div>
           <button
             class="stk-crit-cta"
-            :class="{ done: ordered.includes(c.id) }"
-            :aria-label="ordered.includes(c.id) ? `${c.name} agregado a lista` : `Pedir ${c.name}`"
+            :class="{ done: inShopping.has(c.id) }"
+            :aria-label="inShopping.has(c.id) ? `${c.name} agregado a lista` : `Pedir ${c.name}`"
             @click.stop="orderItem(c)"
           >
-            <template v-if="ordered.includes(c.id)"><UIcon name="i-lucide-check" /> Agregado</template>
+            <template v-if="inShopping.has(c.id)"><UIcon name="i-lucide-check" /> Agregado</template>
             <template v-else><UIcon name="i-lucide-plus" /> Pedir</template>
           </button>
         </div>
@@ -370,7 +373,7 @@ function orderItem(i: Ingredient): void {
 .stk-ai {
   position: relative;
   display: flex; gap: 12px; align-items: flex-start;
-  background: linear-gradient(140deg, #2B2A28 0%, #1A1A1A 100%);
+  background: linear-gradient(140deg, var(--espresso-800) 0%, var(--espresso) 100%);
   border-radius: 14px;
   padding: 14px;
   margin-bottom: 14px;
@@ -430,7 +433,7 @@ function orderItem(i: Ingredient): void {
 .stk-action:active { transform: scale(0.98); }
 .stk-action:hover { background: var(--crema-100); border-color: var(--border); }
 .stk-action.featured {
-  background: linear-gradient(150deg, #FBF8F2 0%, var(--crema-200) 100%);
+  background: linear-gradient(150deg, var(--crema-50) 0%, var(--crema-200) 100%);
   border-color: var(--terracotta-100);
 }
 .stk-action-arrow { position: absolute; top: 12px; right: 12px; color: var(--fg3); }

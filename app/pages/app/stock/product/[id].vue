@@ -4,7 +4,6 @@ import type { InventoryMovement, MovementType, Recipe } from '#shared/types/doma
 definePageMeta({ layout: 'app' })
 
 const route = useRoute()
-const router = useRouter()
 const toast = useToast()
 
 const ingredientId = computed(() => String(route.params.id))
@@ -181,7 +180,19 @@ function openEdit(focusCost: boolean): void {
   showEdit.value = true
 }
 
-function saveEdit(): void {
+const { mutateAsync: updateIngredient, isLoading: savingEdit } = useUpdateIngredient()
+
+async function saveEdit(): Promise<void> {
+  const p = product.value
+  if (!p) return
+  await updateIngredient({
+    id: p.id,
+    name: editForm.name.trim() || p.name,
+    category: editForm.category.trim() || p.category,
+    unit: editForm.unit.trim() || p.unit,
+    unitCost: Number.parseFloat(editForm.cost) || 0,
+    minStock: Number.parseFloat(editForm.min) || 0,
+  })
   showEdit.value = false
   toast.add({
     title: editFocusCost.value ? 'Costo agregado' : 'Cambios guardados',
@@ -232,9 +243,12 @@ async function saveQuickMove(): Promise<void> {
   toast.add({ title: `Movimiento (${quickType.value}) registrado`, icon: 'i-lucide-check-circle-2' })
 }
 
-function addToShopping(qty?: number): void {
+const { mutateAsync: addShopping } = useAddShoppingItem()
+
+async function addToShopping(qty?: number): Promise<void> {
   const p = product.value
   if (!p) return
+  await addShopping({ ingredientId: p.id, suggestedQty: qty })
   toast.add({
     title: qty
       ? `${qty} ${p.unit} de ${p.name} agregados a Lista de Compras`
@@ -248,18 +262,13 @@ function addToShopping(qty?: number): void {
   <div class="pd-page">
     <template v-if="product">
       <!-- ============ Header ============ -->
-      <header class="pd-hdr">
-        <button class="pd-back" aria-label="Volver" @click="router.back()">
-          <UIcon name="i-lucide-arrow-left" />
-        </button>
-        <div class="pd-hdr-title">
-          <h1>{{ product.name }}</h1>
-          <div class="sub">{{ product.category }}</div>
-        </div>
-        <button class="pd-edit" aria-label="Editar insumo" @click="openEdit(false)">
-          <UIcon name="i-lucide-pencil" /> Editar
-        </button>
-      </header>
+      <UiScreenHeader :title="product.name" :subtitle="product.category" back="/app/stock">
+        <template #trailing>
+          <button class="pd-edit" aria-label="Editar insumo" @click="openEdit(false)">
+            <UIcon name="i-lucide-pencil" /> Editar
+          </button>
+        </template>
+      </UiScreenHeader>
 
       <!-- ============ Banner sin costo ============ -->
       <div v-if="isNoCost" class="pd-nocost" role="alert">
@@ -546,7 +555,7 @@ function addToShopping(qty?: number): void {
         <template #cta>
           <div class="pd-sheet-actions">
             <button class="btn btn-ghost" @click="showEdit = false">Cancelar</button>
-            <button class="btn btn-primary" @click="saveEdit">
+            <button class="btn btn-primary" :disabled="savingEdit" @click="saveEdit">
               <UIcon name="i-lucide-check" /> Guardar
             </button>
           </div>
@@ -602,14 +611,14 @@ function addToShopping(qty?: number): void {
 
     <!-- ============ No encontrado ============ -->
     <template v-else>
-      <UiScreenHeader title="Insumo" back="/app/recipes" />
+      <UiScreenHeader title="Insumo" back="/app/stock" />
       <UiEmptyState
         icon="i-lucide-package-x"
         title="Insumo no encontrado"
         subtitle="Puede que haya sido eliminado o que el enlace sea incorrecto."
       >
-        <NuxtLink to="/app/recipes" class="btn btn-primary">
-          <UIcon name="i-lucide-arrow-left" /> Volver
+        <NuxtLink to="/app/stock" class="btn btn-primary">
+          <UIcon name="i-lucide-arrow-left" /> Volver a Stock
         </NuxtLink>
       </UiEmptyState>
     </template>
@@ -628,38 +637,7 @@ function addToShopping(qty?: number): void {
 }
 
 /* ============ HEADER ============ */
-.pd-hdr {
-  padding: 8px 16px 10px;
-  display: grid;
-  grid-template-columns: 40px 1fr auto;
-  align-items: center;
-  gap: 10px;
-}
-.pd-back {
-  width: 40px; height: 40px; border-radius: 12px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  color: var(--fg1);
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer;
-}
-.pd-back:active { transform: scale(0.96); }
-.pd-back .iconify { width: 18px; height: 18px; }
-.pd-hdr-title { min-width: 0; }
-.pd-hdr-title h1 {
-  margin: 0;
-  font-size: 17px; font-weight: 600;
-  color: var(--fg1);
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.pd-hdr-title .sub {
-  font-size: 11.5px; font-weight: 500;
-  letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--fg3);
-  margin-top: 1px;
-}
+/* Header migrado a UiScreenHeader; solo queda el botón "Editar" del trailing */
 .pd-edit {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--pure-white);
