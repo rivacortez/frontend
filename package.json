@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.111",
+    "@types/node": "^22.19.21",
     "playwright-core": "^1.60.0",
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.4"
