@@ -21,6 +21,7 @@ const groups: MenuGroup[] = [
   {
     title: 'Operación',
     entries: [
+      { icon: 'i-lucide-chef-hat', label: 'Cocina (KDS)', sub: 'Cola de pedidos en preparación', to: '/app/cocina' },
       { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Catálogo, costos y márgenes', to: '/app/recipes' },
       { icon: 'i-lucide-package', label: 'Inventario', sub: 'Stock, movimientos y conteos', to: '/app/stock' },
       { icon: 'i-lucide-receipt', label: 'Comprobantes', sub: 'Ventas y tickets emitidos', to: '/app/invoices' },
