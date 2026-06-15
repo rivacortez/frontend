@@ -32,6 +32,12 @@ const catalogEntries: SettingsEntry[] = [
   { icon: 'i-lucide-link', label: 'Insumos y proveedores', sub: 'Precios y proveedor preferido por insumo', to: '/app/settings/product-suppliers' },
 ]
 
+// Costeo (E06) — configuración de márgenes. Owner/manager (backend 403 a staff).
+const costingEntries: SettingsEntry[] = [
+  { icon: 'i-lucide-receipt-text', label: 'Costos indirectos (CIF)', sub: 'Alquiler, sueldos y servicios por mes', to: '/app/settings/overhead-costs' },
+  { icon: 'i-lucide-percent', label: 'Costeo y márgenes', sub: 'Costo, margen y precio sugerido por plato', to: '/app/costeo' },
+]
+
 const initials = computed(() =>
   (settings.value?.business.name ?? '')
     .split(' ')
@@ -76,6 +82,23 @@ const initials = computed(() =>
       <div class="settings-list">
         <NuxtLink
           v-for="entry in catalogEntries"
+          :key="entry.to"
+          :to="entry.to"
+          class="settings-item"
+        >
+          <span class="settings-ico" aria-hidden="true"><UIcon :name="entry.icon" /></span>
+          <span class="settings-text">
+            <span class="settings-label">{{ entry.label }}</span>
+            <span class="settings-sub">{{ entry.sub }}</span>
+          </span>
+          <UIcon name="i-lucide-chevron-right" class="settings-chevron" aria-hidden="true" />
+        </NuxtLink>
+      </div>
+
+      <div class="section-eyebrow">Costeo</div>
+      <div class="settings-list">
+        <NuxtLink
+          v-for="entry in costingEntries"
           :key="entry.to"
           :to="entry.to"
           class="settings-item"

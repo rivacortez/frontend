@@ -10,6 +10,7 @@ interface MenuEntry {
   sub: string
   to: string
   soon?: boolean
+  ownerOnly?: boolean
 }
 
 interface MenuGroup {
@@ -17,13 +18,17 @@ interface MenuGroup {
   entries: MenuEntry[]
 }
 
-const groups: MenuGroup[] = [
+// Costeo/márgenes (E06) es info de gestión: solo owner/manager (el backend 403ea a staff).
+const canManage = computed(() => user.value?.role === 'owner' || user.value?.role === 'manager')
+
+const allGroups: MenuGroup[] = [
   {
     title: 'Operación',
     entries: [
       { icon: 'i-lucide-chef-hat', label: 'Cocina (KDS)', sub: 'Cola de pedidos en preparación', to: '/app/cocina' },
       { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Catálogo, costos y márgenes', to: '/app/recipes' },
       { icon: 'i-lucide-package', label: 'Inventario', sub: 'Stock, movimientos y conteos', to: '/app/stock' },
+      { icon: 'i-lucide-percent', label: 'Costeo y márgenes', sub: 'Costo, margen y precio por plato', to: '/app/costeo', ownerOnly: true },
       { icon: 'i-lucide-receipt', label: 'Comprobantes', sub: 'Ventas y tickets emitidos', to: '/app/invoices' },
       { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'KPIs y análisis semanal', to: '/app/reports' },
     ],
@@ -44,6 +49,13 @@ const groups: MenuGroup[] = [
     ],
   },
 ]
+
+// Oculta las entradas owner-only (p. ej. Costeo) cuando el rol no es owner/manager.
+const groups = computed<MenuGroup[]>(() =>
+  allGroups
+    .map(g => ({ ...g, entries: g.entries.filter(e => !e.ownerOnly || canManage.value) }))
+    .filter(g => g.entries.length > 0),
+)
 
 async function logout(): Promise<void> {
   await $fetch('/api/auth/logout', { method: 'POST' })
