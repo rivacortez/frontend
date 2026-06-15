@@ -215,4 +215,10 @@ Convención BD: snake_case, `tenant_id NOT NULL`, soft delete (`deleted_at`), mo
 
 **Adaptación registrada:** `Invoices.jsx` del prototipo es historial de facturas de PROVEEDOR; se adaptó a comprobantes de VENTA emitidos (los genera el cobro del POS), que es lo que el dominio §7 modela. Las compras a proveedor viven en Magic Upload + movimientos de inventario.
 
-- **Siguiente paso:** integrar API NestJS real (reemplazar handlers mock del BFF), Better-Auth, y E07/E08 (reportes + forecast con vue-echarts — únicas pantallas sin prototipo).
+## 11c. Estado de integración con el backend (2026-06-15)
+
+- ✅ **Auth integrada y validada E2E.** El BFF proxea `login`/`register` a NestJS y **sella los tokens en la cookie** (`server/utils/backend.ts` → `establishSession`); `GET /api/users` y `PATCH /api/users/:id/role` proxeados con `backendFetch` (Bearer desde la sesión; el RBAC del backend se propaga). `NUXT_API_BASE` apunta al backend (3333 en dev).
+- 🔲 **Pendiente — logout server-side (HU-01-08):** `server/api/auth/logout.post.ts` solo limpia la cookie; falta llamar a `POST /api/auth/logout` del backend para **revocar el refresh token**. El endpoint del backend ya existe (cambio chico, ver el TODO en ese archivo).
+- 🔲 **Rutas de dominio aún MOCK:** recipes / inventory / sales / tables / orders / chat / ingestions / settings siguen sobre `server/utils/mock-db.ts` **hasta que el backend exponga esos dominios (E02–E05)**. Al existir, se reemplaza cada handler por `backendFetch(event, '/api/...')` (el cliente no cambia).
+- 🔲 **Diferido por requerir correo (Resend):** invitaciones (HU-01-05) y recuperación de contraseña (HU-01-07) — ver `Product Backlog.md` / `specs/TRACEABILITY.md` del backend.
+- Otros pendientes: Better-Auth (orgs), E07/E08 (reportes + forecast con vue-echarts — únicas pantallas sin prototipo).
