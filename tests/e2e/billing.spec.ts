@@ -148,10 +148,15 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
     // Confirmar cobro.
     await sheet.getByRole('button', { name: /confirmar cobro/i }).click()
 
-    // Pantalla de éxito con el número de comprobante emitido + total. (Best-effort: al
-    // liberarse la mesa, `useTable` refetchea y la orden pasa a null → el sheet se
-    // desmonta poco después; la verificación DURADERA es el comprobante en /app/invoices.)
-    await expect(sheet.getByText(/pago registrado/i)).toBeVisible({ timeout: 5000 }).catch(() => {})
+    // Pantalla de éxito: el comprobante emitido se muestra y PERSISTE aunque la mesa
+    // ya se haya liberado (la orden+mesa se congelan al abrir el cobro; antes el sheet
+    // se desmontaba al refetchear → el comprobante nunca se veía).
+    await expect(sheet.getByText('Pago registrado')).toBeVisible()
+    await expect(sheet.locator('.cb-success-text')).toContainText(/B\d+-\d+/)
+
+    // El CTA "Volver al POS" cierra el cobro y lleva al mapa de mesas.
+    await sheet.getByRole('button', { name: /volver al pos/i }).click()
+    await expect(owner.page).toHaveURL(/\/app\/pos(\/|$)/)
 
     // La mesa quedó libre en el POS (sin tarjetas "por cobrar" ni ocupadas) → cobro persistido.
     await gotoHydrated(owner, '/app/pos')

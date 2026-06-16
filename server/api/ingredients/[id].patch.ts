@@ -17,7 +17,9 @@ interface BeIngredient {
 
 const patchIngredientSchema = z.object({
   name: z.string().min(1).optional(),
-  category: z.string().min(1).optional(),
+  // Categoría opcional/nullable en el backend: aceptamos '' (insumo sin categoría)
+  // y simplemente no lo reenviamos, en vez de rechazar con 400 (antes min(1)).
+  category: z.string().optional(),
   unit: z.string().min(1).optional(),
   unitCost: z.number().nonnegative().optional(),
   // minStock pertenece a Inventario (E05): se enruta a PATCH /api/inventory/levels/:id.
@@ -38,7 +40,7 @@ export default defineEventHandler(async (event) => {
 
   const beBody: Record<string, unknown> = {}
   if (body.name !== undefined) beBody.name = body.name
-  if (body.category !== undefined) beBody.category = body.category
+  if (body.category && body.category.trim()) beBody.category = body.category.trim()
   if (body.unit !== undefined) beBody.unit = body.unit
   if (body.unitCost !== undefined) beBody.unitCost = body.unitCost
 

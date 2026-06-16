@@ -89,9 +89,9 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     const nuevoNombre = `${original} editada`
     const inputs = sheet.locator('input')
     await inputs.nth(0).fill(nuevoNombre) // 0 = Nombre
-    // 1 = Categoría: el insumo sembrado no tiene categoría y el BFF exige min(1)
-    // al guardar, así que la completamos (acción natural del usuario al editar).
-    await inputs.nth(1).fill('Verduras y frutas')
+    // Dejamos la CATEGORÍA vacía a propósito: el insumo sembrado no tiene categoría y
+    // editarlo sin completarla debe funcionar (antes el BFF rechazaba category:'' con
+    // 400; ahora la omite). Solo cambiamos nombre + costo.
     // El costo es el input con inputmode decimal y placeholder "S/ ..." dentro del sheet.
     const costInput = sheet.locator('input[inputmode="decimal"]').first()
     await costInput.fill('7.25')

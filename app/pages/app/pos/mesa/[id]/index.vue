@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { OrderItem } from '#shared/types/domain'
+import type { DiningTable, Order, OrderItem } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
 
@@ -143,6 +143,19 @@ async function removeLive(): Promise<void> {
   itemSheet.value = null
   await refresh()
 }
+
+// Snapshot de la orden+mesa al abrir el cobro: el sheet de éxito debe sobrevivir a
+// que la mesa quede libre (refetch) tras el pago. Si dependiera de `order` (que pasa
+// a null al liberarse), se desmontaría antes de que el usuario vea el comprobante.
+const chargeCtx = ref<{ order: Order, table: DiningTable } | null>(null)
+function openCharge(): void {
+  if (!order.value || !table.value) return
+  chargeCtx.value = { order: order.value, table: table.value }
+  chargeOpen.value = true
+}
+watch(chargeOpen, (isOpen) => {
+  if (!isOpen) chargeCtx.value = null
+})
 
 function onPaid(serie: string, number: number): void {
   toast.add({
@@ -288,7 +301,7 @@ function onPaid(serie: string, number: number): void {
         <button v-if="hasPending" class="btn btn-send" @click="sendToKitchen">
           <UIcon name="i-lucide-send" /> Enviar {{ cart.length }} a cocina
         </button>
-        <button v-else class="btn btn-charge" :disabled="!order || order.items.length === 0" @click="chargeOpen = true">
+        <button v-else class="btn btn-charge" :disabled="!order || order.items.length === 0" @click="openCharge">
           <UIcon name="i-lucide-credit-card" /> Cobrar {{ formatPEN(total) }}
         </button>
       </div>
@@ -297,7 +310,7 @@ function onPaid(serie: string, number: number): void {
       <PosCatalogSheet v-if="table" v-model="catalogOpen" :table="table" @confirm="onCatalogConfirm" />
       <PosMesaActionsSheet v-if="table" v-model="actionsOpen" :table="table" :order="order" @discount="discountOpen = true" />
       <PosDiscountSheet v-if="order" v-model="discountOpen" :order="order" @applied="refresh()" />
-      <PosCobrarSheet v-if="order && table" v-model="chargeOpen" :order="order" :table="table" @paid="onPaid" />
+      <PosCobrarSheet v-if="chargeCtx" v-model="chargeOpen" :order="chargeCtx.order" :table="chargeCtx.table" @paid="onPaid" />
       <PosAdjustPriceSheet v-if="order" v-model="adjustItem" :order="order" @adjusted="refresh()" />
 
       <!-- Mini sheet: opciones de item -->
