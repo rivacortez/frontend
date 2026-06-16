@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { changePasswordSchema } from '#shared/schemas/auth'
+
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Perfil — GastronomIA' })
 
@@ -34,6 +36,51 @@ async function logout(): Promise<void> {
   await $fetch('/api/auth/logout', { method: 'POST' })
   await clear()
   await navigateTo('/login')
+}
+
+/* ===== Cambio de contraseña (HU-01-06) ===== */
+const showPassword = ref(false)
+const pwd = reactive({ current: '', next: '', confirm: '' })
+const pwdSaving = ref(false)
+const pwdError = ref<string | null>(null)
+
+const pwdValid = computed(() =>
+  changePasswordSchema.safeParse({ currentPassword: pwd.current, newPassword: pwd.next }).success
+  && pwd.next === pwd.confirm)
+
+function openPassword(): void {
+  pwd.current = ''
+  pwd.next = ''
+  pwd.confirm = ''
+  pwdError.value = null
+  showPassword.value = true
+}
+
+async function submitPassword(): Promise<void> {
+  if (pwdSaving.value) return
+  pwdError.value = null
+  if (pwd.next !== pwd.confirm) {
+    pwdError.value = 'Las contraseñas no coinciden'
+    return
+  }
+  const parsed = changePasswordSchema.safeParse({ currentPassword: pwd.current, newPassword: pwd.next })
+  if (!parsed.success) {
+    pwdError.value = parsed.error.issues[0]?.message ?? 'Revisa los datos'
+    return
+  }
+  pwdSaving.value = true
+  try {
+    await $fetch('/api/auth/password', { method: 'PATCH', body: parsed.data })
+    showPassword.value = false
+    toast.add({ title: 'Contraseña actualizada', icon: 'i-lucide-check-circle-2' })
+  }
+  catch (e) {
+    const err = e as { data?: { message?: string }, statusMessage?: string }
+    pwdError.value = err.data?.message ?? err.statusMessage ?? 'No se pudo cambiar la contraseña'
+  }
+  finally {
+    pwdSaving.value = false
+  }
 }
 </script>
 
@@ -129,7 +176,7 @@ async function logout(): Promise<void> {
           <span class="pf-row-body"><span class="pf-row-label">Centro de ayuda</span></span>
           <UIcon name="i-lucide-chevron-right" class="pf-chev" />
         </NuxtLink>
-        <button class="pf-row" @click="toast.add({ title: 'Cambio de contraseña disponible con la API (Sprint 1)', icon: 'i-lucide-info' })">
+        <button class="pf-row" @click="openPassword">
           <span class="pf-row-ico"><UIcon name="i-lucide-key-round" /></span>
           <span class="pf-row-body"><span class="pf-row-label">Cambiar contraseña</span></span>
           <UIcon name="i-lucide-chevron-right" class="pf-chev" />
@@ -140,6 +187,43 @@ async function logout(): Promise<void> {
       </UButton>
       <p class="pf-version">GastronomIA v0.1.0 · Hecho con <span class="heart">♥</span> en Lima, Perú</p>
     </section>
+
+    <!-- Sheet: cambio de contraseña (HU-01-06) -->
+    <UiBottomSheet
+      v-model="showPassword"
+      title="Cambiar contraseña"
+      subtitle="Mínimo 12 caracteres con mayúscula, minúscula, número y símbolo."
+    >
+      <div class="pf-pwd-form">
+        <UInput
+          v-model="pwd.current"
+          type="password"
+          size="lg"
+          autocomplete="current-password"
+          placeholder="Tu contraseña actual"
+        />
+        <UInput
+          v-model="pwd.next"
+          type="password"
+          size="lg"
+          autocomplete="new-password"
+          placeholder="Nueva contraseña"
+        />
+        <UInput
+          v-model="pwd.confirm"
+          type="password"
+          size="lg"
+          autocomplete="new-password"
+          placeholder="Repite la contraseña"
+        />
+        <p v-if="pwdError" class="pf-pwd-error" role="alert">{{ pwdError }}</p>
+      </div>
+      <template #cta>
+        <UButton block size="lg" :loading="pwdSaving" :disabled="!pwdValid" @click="submitPassword">
+          Actualizar contraseña
+        </UButton>
+      </template>
+    </UiBottomSheet>
   </div>
 </template>
 
@@ -215,4 +299,7 @@ async function logout(): Promise<void> {
   margin: 16px 0 0;
 }
 .heart { color: var(--terracotta); }
+
+.pf-pwd-form { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 8px; }
+.pf-pwd-error { color: var(--danger); font-size: 12.5px; margin: 2px 0 0; }
 </style>

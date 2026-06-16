@@ -10,9 +10,8 @@ import { test, expect, registerTenant, loginUI, seedUser, SEED_PWD } from './_fi
  * depende de IA/servicios externos (chat, forecast/alertas "Demo" E08, magic-upload,
  * correo: invitaciones/forgot-password, SUNAT).
  *
- * NOTA (limitación real, ver test skip): el cambio de contraseña (HU-01-06) NO está
- * implementado en el frontend — el botón "Cambiar contraseña" del perfil solo lanza un
- * toast y no existe endpoint/UI. Ese flujo no es testeable hoy.
+ * HU-01-06 (cambio de contraseña): implementado vía un formulario en el perfil que
+ * PATCHea /api/auth/password; se prueba abajo (la nueva clave loguea, la antigua no).
  */
 
 /* ============ Helpers locales del spec ============ */
@@ -144,39 +143,50 @@ test.describe('Registro (onboarding)', () => {
 })
 
 /* ============ Cambio de contraseña (HU-01-06) ============
-   NO IMPLEMENTADO en el frontend: el botón "Cambiar contraseña" del perfil solo
-   lanza un toast informativo ("disponible con la API · Sprint 1") y no existe
-   endpoint /api/auth/change-password ni formulario. Se documenta y se omite. */
+   Implementado: el perfil abre un formulario (sheet) que PATCHea /api/auth/password.
+   El backend verifica la contraseña actual y exige contraseña fuerte (mín. 12 +
+   mayúscula, minúscula, dígito y símbolo). */
 test.describe('Cambio de contraseña (HU-01-06)', () => {
-  test.fixme(true, 'No implementado: el perfil solo muestra un toast; sin endpoint ni formulario de cambio de contraseña.')
+  test('cambia la clave: la nueva permite login y la antigua deja de servir', async ({ owner, browser }) => {
+    const NEW_PWD = 'NuevaClave123!@'
 
-  test('cambia la contraseña y permite login con la nueva (pendiente de implementación)', async ({ owner }) => {
-    // Cuando exista la feature: ir a /app/profile, cambiar la contraseña, luego
-    // loginUI con la nueva debe funcionar y con la antigua debe fallar.
-    expect(owner.tenantId).toBeTruthy()
-  })
-})
-
-/** Cobertura efectiva del perfil HOY: el botón existe pero la credencial NO cambia
- *  (sigue valiendo la contraseña original). Evita un falso verde sobre HU-01-06. */
-test.describe('Perfil · contraseña (estado actual)', () => {
-  test('el botón "Cambiar contraseña" está presente pero la credencial original sigue siendo válida', async ({ owner, browser }) => {
-    // El control existe en la UI del perfil (label "Cambiar contraseña").
+    // Abrir el formulario desde el perfil y enviar el cambio.
     await owner.page.goto('/app/profile')
     await ready(owner.page)
-    await expect(owner.page.getByText('Cambiar contraseña')).toBeVisible()
+    await owner.page.getByRole('button', { name: /cambiar contraseña/i }).click()
+    const sheet = owner.page.getByRole('dialog', { name: /cambiar contraseña/i })
+    await expect(sheet).toBeVisible()
+    await sheet.getByPlaceholder('Tu contraseña actual').fill(SEED_PWD)
+    await sheet.getByPlaceholder('Nueva contraseña').fill(NEW_PWD)
+    await sheet.getByPlaceholder('Repite la contraseña').fill(NEW_PWD)
+    await sheet.getByRole('button', { name: /actualizar contraseña/i }).click()
+    await expect(owner.page.getByText('Contraseña actualizada', { exact: true })).toBeVisible()
 
-    // No hay flujo real de cambio: la contraseña original sigue autenticando.
-    // Se valida en un contexto NUEVO porque /login redirige a /app cuando ya hay
-    // sesión (middleware): la página del owner no puede volver al formulario.
+    // La NUEVA contraseña permite iniciar sesión (contexto nuevo, sin la sesión del owner).
     const ctx = await browser.newContext()
     const page = await ctx.newPage()
     try {
-      await loginUI(page, owner.email, SEED_PWD)
+      await loginUI(page, owner.email, NEW_PWD)
       await expect(page).toHaveURL(/\/app(\/|$)/)
     }
     finally {
       await ctx.close()
+    }
+
+    // La ANTIGUA contraseña ya no autentica → se queda en /login con alerta.
+    const ctx2 = await browser.newContext()
+    const page2 = await ctx2.newPage()
+    try {
+      await page2.goto('/login')
+      await ready(page2)
+      await page2.getByPlaceholder('tu@correo.com').fill(owner.email)
+      await page2.getByPlaceholder('Tu contraseña').fill(SEED_PWD)
+      await page2.getByRole('button', { name: /iniciar sesión/i }).click()
+      await expect(page2.getByRole('alert')).toBeVisible()
+      await expect(page2).toHaveURL(/\/login/)
+    }
+    finally {
+      await ctx2.close()
     }
   })
 })
