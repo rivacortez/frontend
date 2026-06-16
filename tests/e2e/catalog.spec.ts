@@ -132,17 +132,17 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     // Resultado del inventario (proviene de /api/ingredients?q=).
     await searchSheet.getByRole('button', { name: new RegExp(insumo, 'i') }).click()
 
-    // Sheet de detalle del insumo. Lo expresamos en la MISMA unidad del insumo (kg)
-    // para que el costo persistido coincida con el del wizard: 0.2 kg × S/40 = S/8.00.
-    // (Con sub-unidades como "g" el backend recibe la cantidad sin convertir → costo
-    //  inflado; ver nota de bug en el reporte.)
+    // Sheet de detalle. Lo expresamos en una SUB-UNIDAD (200 g de un insumo en kg) —
+    // que es además el flujo por defecto del wizard (defaultUnitFor → g/200). El BFF
+    // debe convertir g→kg antes de persistir: 200 g = 0.2 kg × S/40 = S/8.00. Si NO
+    // convirtiera, el backend recibiría qty=200 (kg) y persistiría S/8000 (regresión).
     const detailSheet = page.getByRole('dialog')
     await expect(detailSheet.locator('#qty-input')).toBeVisible()
-    await detailSheet.getByLabel(/unidad de medida/i).selectOption('kg')
-    await detailSheet.locator('#qty-input').fill('0.2')
+    await detailSheet.getByLabel(/unidad de medida/i).selectOption('g')
+    await detailSheet.locator('#qty-input').fill('200')
     await detailSheet.getByRole('button', { name: /agregar al bom/i }).click()
 
-    // El insumo quedó en la lista del BOM (costo S/ 8.00 = 0.2 kg × 40).
+    // El insumo quedó en la lista del BOM (costo S/ 8.00 = 200 g × S/40/kg).
     await expect(page.getByRole('button', { name: new RegExp(`editar ${insumo}`, 'i') })).toBeVisible()
     await page.getByRole('button', { name: /siguiente: revisión/i }).click()
 
@@ -187,15 +187,16 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     // aria-label real del botón: "Siguiente paso: insumos".
     await page.getByRole('button', { name: /siguiente.*insumos/i }).click()
 
-    // Paso 2 · agregar el insumo en kg (0.2 kg × S/40 = S/8.00 de costo persistido).
+    // Paso 2 · agregar el insumo en GRAMOS (200 g = 0.2 kg × S/40 = S/8.00 persistido,
+    // vía la conversión del BFF).
     await page.getByRole('button', { name: /agregar primer insumo/i }).click()
     const searchSheet = page.getByRole('dialog', { name: /agregar insumo/i })
     await searchSheet.locator('#search-insumo').fill(insumo)
     await searchSheet.getByRole('button', { name: new RegExp(insumo, 'i') }).click()
     const detailSheet = page.getByRole('dialog')
     await expect(detailSheet.locator('#qty-input')).toBeVisible()
-    await detailSheet.getByLabel(/unidad de medida/i).selectOption('kg')
-    await detailSheet.locator('#qty-input').fill('0.2')
+    await detailSheet.getByLabel(/unidad de medida/i).selectOption('g')
+    await detailSheet.locator('#qty-input').fill('200')
     await detailSheet.getByRole('button', { name: /agregar al bom/i }).click()
     await page.getByRole('button', { name: /siguiente: revisión/i }).click()
 

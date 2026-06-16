@@ -170,17 +170,44 @@ interface RecipePayload {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// Factor a la unidad base de cada familia (masa→g, volumen→ml). Misma tabla que el
+// wizard (`convertQty` en recipes/new.vue) para que el costo persistido coincida con
+// el mostrado. Las unidades de conteo (u, porción) no se convierten.
+const UNIT_FACTOR_TO_BASE: Record<string, number> = { g: 1, kg: 1000, ml: 1, L: 1000 }
+
+/**
+ * Convierte `qty` de la unidad de display del BOM (p. ej. 200 g) a la unidad del
+ * insumo (p. ej. kg). El backend guarda qty EN la unidad del insumo y recalcula
+ * `lineCost = qty × unitCost`; sin convertir, 200 g de un insumo en kg se persiste
+ * como 200 kg (costo ×1000). Si alguna unidad no es convertible, deja qty igual.
+ */
+function convertQtyToIngredientUnit(qty: number, from: string, to: string): number {
+  if (!from || from === to) return qty
+  const f = UNIT_FACTOR_TO_BASE[from]
+  const t = UNIT_FACTOR_TO_BASE[to]
+  return f == null || t == null ? qty : qty * (f / t)
+}
+
 /**
  * Mapea los ítems del BOM al backend. Los ítems "ad-hoc" del wizard (creados
  * en línea, con id no-UUID y costo manual) se **persisten como insumos** del
  * catálogo antes de referenciarlos — el backend exige que cada ítem apunte a un
- * insumo o sub-receta real.
+ * insumo o sub-receta real. Para insumos reales (UUID) se convierte `qty` de la
+ * unidad de la línea a la unidad del insumo antes de persistir (ver bug del costo ×1000).
  */
 async function resolveBackendItems(event: H3Event, items: RecipeItem[]) {
+  // Unidades de los insumos reales (UUID), para convertir qty a la unidad del insumo.
+  const ingUnitById = new Map<string, string>()
+  if (items.some(it => UUID_RE.test(it.ingredientId))) {
+    const ings = await backendFetch<Envelope<BeIngredient[]>>(event, '/api/ingredients')
+    for (const i of ings.data) ingUnitById.set(i.id, i.unit)
+  }
   const out: { ingredientId: string, qty: number, wasteFactor: number }[] = []
   for (const it of items) {
     let ingredientId = it.ingredientId
+    let qty = it.qty
     if (!UUID_RE.test(ingredientId)) {
+      // Ad-hoc: el insumo se crea con la unidad de la línea → qty ya está en esa unidad.
       const unitCost = it.qty > 0 ? it.cost / it.qty : it.cost
       const slug = it.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').slice(0, 32) || 'INSUMO'
       const created = await backendFetch<Envelope<{ id: string }>>(event, '/api/ingredients', {
@@ -195,7 +222,12 @@ async function resolveBackendItems(event: H3Event, items: RecipeItem[]) {
       })
       ingredientId = created.data.id
     }
-    out.push({ ingredientId, qty: it.qty, wasteFactor: (it.wastePct ?? 0) / 100 })
+    else {
+      // Insumo real: convertir qty de la unidad de la línea a la unidad del insumo.
+      const ingUnit = ingUnitById.get(ingredientId)
+      if (ingUnit) qty = convertQtyToIngredientUnit(it.qty, it.unit, ingUnit)
+    }
+    out.push({ ingredientId, qty, wasteFactor: (it.wastePct ?? 0) / 100 })
   }
   return out
 }
