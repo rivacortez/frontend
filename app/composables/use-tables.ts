@@ -1,5 +1,5 @@
 import type { ApiResponse } from '#shared/types/api'
-import type { DiningTable, Order, OrderDiscount, OrderPayment, Sale } from '#shared/types/domain'
+import type { DiningTable, Order, OrderDiscount, OrderPayment, Sale, TableStatus } from '#shared/types/domain'
 
 export function useTables() {
   return useQuery({
@@ -120,6 +120,91 @@ export function usePayOrder() {
     ]),
   })
 }
+
+/* ===== Config del salón (HU-03-01) — gestión de mesas para Ajustes ===== */
+// Estas funciones operan sobre el `TableView` CRUDO del backend (code/zoneId/
+// capacity), separado del POS: usan la query key ['tables-config'] (distinta de
+// la ['tables'] del mapa POS) y rutas dedicadas que no pasan por el pos-adapter.
+// El POS (useTables/usePatchTable de arriba) NO cambia.
+
+export interface TableConfig {
+  id: string
+  zoneId: string
+  zoneName: string
+  code: string
+  capacity: number
+  status: string
+  posX: number | null
+  posY: number | null
+}
+
+export interface TableConfigPayload {
+  zoneId: string
+  code: string
+  capacity?: number
+}
+
+/** Lista de mesas en shape de config (crudo). GET /api/tables/config. */
+export function useTablesConfig() {
+  return useQuery({
+    key: () => ['tables-config'] as const,
+    query: () => $fetch<ApiResponse<TableConfig[]>>('/api/tables/config').then(r => r.data),
+  })
+}
+
+function useInvalidateTablesConfig() {
+  const cache = useQueryCache()
+  // Invalida la config + el mapa POS + las zonas (su conteo de mesas cambia).
+  return () => Promise.all([
+    cache.invalidateQueries({ key: ['tables-config'] }),
+    cache.invalidateQueries({ key: ['tables'] }),
+    cache.invalidateQueries({ key: ['zones'] }),
+  ])
+}
+
+export function useCreateTable() {
+  const invalidate = useInvalidateTablesConfig()
+  return useMutation({
+    // 409 si el `code` ya existe en el tenant → el caller lo muestra como toast.
+    mutation: (payload: TableConfigPayload) =>
+      $fetch<ApiResponse<TableConfig>>('/api/tables', { method: 'POST', body: payload }).then(r => r.data),
+    onSettled: invalidate,
+  })
+}
+
+export function useUpdateTableConfig() {
+  const invalidate = useInvalidateTablesConfig()
+  return useMutation({
+    // Renombrar (code), cambiar capacidad o mover de zona (zoneId). Ruta dedicada
+    // /api/tables/:id/config (NO el PATCH del POS, que solo toca status). 409 dup.
+    mutation: ({ id, ...payload }: Partial<TableConfigPayload> & { id: string }) =>
+      $fetch<ApiResponse<TableConfig>>(`/api/tables/${id}/config`, { method: 'PATCH', body: payload }).then(r => r.data),
+    onSettled: invalidate,
+  })
+}
+
+export function useDeleteTable() {
+  const invalidate = useInvalidateTablesConfig()
+  return useMutation({
+    // 409 si la mesa no está libre (el backend lo bloquea) → toast en el caller.
+    mutation: (id: string) =>
+      $fetch<ApiResponse<null>>(`/api/tables/${id}`, { method: 'DELETE' }),
+    onSettled: invalidate,
+  })
+}
+
+/** Etiqueta legible del estado de una mesa (para el badge de la pantalla de config). */
+export function tableStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    free: 'Libre',
+    occupied: 'Ocupada',
+    bill: 'Por cobrar',
+    reserved: 'Reservada',
+  }
+  return map[status] ?? status
+}
+
+export const TABLE_STATUS_VALUES: TableStatus[] = ['free', 'occupied', 'bill', 'reserved']
 
 /** Totales de una orden con descuento aplicado (IGV ya incluido en precios). */
 export function orderTotals(order: Order | null | undefined): { gross: number, discount: number, total: number } {

@@ -21,7 +21,7 @@ const entries: SettingsEntry[] = [
   { icon: 'i-lucide-clock', label: 'Horarios', sub: 'Atención al cliente por día', to: '/app/settings/hours' },
   { icon: 'i-lucide-book-open', label: 'Carta', sub: 'Precios, disponibilidad y promociones', to: '/app/settings/menu' },
   { icon: 'i-lucide-credit-card', label: 'Métodos de pago', sub: 'Efectivo, tarjeta, Yape y Plin', to: '/app/settings/payments' },
-  { icon: 'i-lucide-layout-grid', label: 'Mesas y áreas', sub: 'Zonas del salón y número de mesas', to: '/app/settings/tables' },
+  { icon: 'i-lucide-layout-grid', label: 'Zonas y mesas', sub: 'Áreas del salón y mesas (código, capacidad)', to: '/app/settings/tables' },
   { icon: 'i-lucide-percent', label: 'Impuestos y comprobantes', sub: 'IGV y series de boleta y factura', to: '/app/settings/tax' },
 ]
 
