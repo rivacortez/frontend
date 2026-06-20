@@ -2,81 +2,64 @@
 import type { ChatMessage } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
-useSeoMeta({ title: 'Chat IA — GastronomIA' })
+useSeoMeta({ title: 'Chat analítico — GastronomIA' })
 
 const { user } = useUserSession()
 const toast = useToast()
 const { messages, streaming, ask, stop } = useChatStream()
 
-const firstName = computed(() => user.value?.name.split(' ')[0] ?? '')
-const initials = computed(() =>
-  (user.value?.name ?? '')
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(word => word[0])
-    .join('')
-    .toUpperCase(),
-)
+const firstName = computed(() => user.value?.name?.split(' ')[0] ?? '')
 
-// ===== Sugerencias =====
-interface Suggestion {
-  id: string
-  emoji: string
+// ===== Catálogo de consultas por categoría (estado inicial) =====
+interface QueryCategory {
   label: string
-  ex: string
+  questions: string[]
 }
-
-const SUGGESTIONS_PRIMARY: Suggestion[] = [
-  { id: 's1', emoji: '📊', label: 'Ventas del día', ex: '¿Cuánto vendí hoy?' },
-  { id: 's2', emoji: '🏆', label: 'Plato más vendido', ex: '¿Cuál es mi top de la semana?' },
-  { id: 's3', emoji: '📦', label: 'Stock crítico', ex: '¿Qué insumos están por agotarse?' },
-  { id: 's4', emoji: '💰', label: 'Margen promedio', ex: '¿Cuál es mi margen real?' },
+const CATEGORIES: QueryCategory[] = [
+  {
+    label: 'Ventas',
+    questions: [
+      '¿Cuánto vendí hoy?',
+      '¿Cuál es mi ticket promedio?',
+      '¿Cuál fue mi plato más vendido esta semana?',
+    ],
+  },
+  {
+    label: 'Inventario',
+    questions: [
+      '¿Qué insumos están por agotarse?',
+      '¿Cuánto vale mi stock actual?',
+      '¿Qué mermas tuve este mes?',
+    ],
+  },
+  {
+    label: 'Márgenes y costos',
+    questions: [
+      '¿Cuál es mi margen real?',
+      '¿Cuál es mi plato más rentable?',
+      '¿Qué platos tienen food cost alto?',
+    ],
+  },
+  {
+    label: 'Tendencias',
+    questions: [
+      '¿Cómo va la semana vs la anterior?',
+      'Comparame este mes con el anterior',
+      '¿Qué día de la semana vendo más?',
+    ],
+  },
 ]
-
-const SUGGESTIONS_MORE: Suggestion[] = [
-  { id: 's5', emoji: '📈', label: 'Tendencia semanal', ex: '¿Cómo va la semana vs la anterior?' },
-  { id: 's6', emoji: '🎯', label: 'Ticket promedio', ex: '¿Cómo está mi ticket promedio?' },
-  { id: 's7', emoji: '🥇', label: 'Plato más rentable', ex: '¿Cuál es mi plato con mejor margen?' },
-  { id: 's8', emoji: '📅', label: 'Mes vs mes', ex: 'Compara este mes con el anterior' },
-]
-
-const suggestionsExpanded = ref(false)
-const visibleSuggestions = computed(() =>
-  suggestionsExpanded.value ? [...SUGGESTIONS_PRIMARY, ...SUGGESTIONS_MORE] : SUGGESTIONS_PRIMARY,
-)
-
-function pickSuggestion(question: string): void {
-  ask(question)
-}
 
 // ===== Input =====
-const PLACEHOLDERS = [
-  'Pregúntame algo…',
-  'Ej: ¿cuál es mi plato más rentable?',
-  'Ej: ¿qué insumos están por agotarse?',
-  'Ej: comparar esta semana con la anterior',
-]
-
 const text = ref('')
-const placeholderIdx = ref(0)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
-let placeholderTimer: ReturnType<typeof setInterval> | undefined
-
-onMounted(() => {
-  placeholderTimer = setInterval(() => {
-    if (!text.value) placeholderIdx.value = (placeholderIdx.value + 1) % PLACEHOLDERS.length
-  }, 4000)
-})
-onBeforeUnmount(() => clearInterval(placeholderTimer))
-
 const hasText = computed(() => text.value.trim().length > 0)
 
 watch(text, () => {
   const el = inputEl.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, 100)}px`
+  el.style.height = `${Math.min(el.scrollHeight, 120)}px`
 })
 
 function send(): void {
@@ -84,10 +67,6 @@ function send(): void {
   if (!question || streaming.value) return
   text.value = ''
   ask(question)
-}
-
-function onMic(): void {
-  toast.add({ title: 'Dictado por voz · Próximamente', icon: 'i-lucide-mic' })
 }
 
 // ===== Auto-scroll en cada chunk =====
@@ -99,11 +78,7 @@ watch(messages, () => {
 }, { deep: true, flush: 'post' })
 
 // ===== Render de **bold** sin librerías =====
-interface TextSegment {
-  text: string
-  bold: boolean
-}
-
+interface TextSegment { text: string, bold: boolean }
 function boldSegments(content: string): TextSegment[] {
   return content
     .split('**')
@@ -113,11 +88,9 @@ function boldSegments(content: string): TextSegment[] {
 
 // ===== Bloque SQL colapsable =====
 const collapsedSql = reactive<Record<string, boolean>>({})
-
 function toggleSql(id: string): void {
   collapsedSql[id] = !collapsedSql[id]
 }
-
 function showTyping(message: ChatMessage, index: number): boolean {
   return message.role === 'assistant'
     && streaming.value
@@ -125,20 +98,8 @@ function showTyping(message: ChatMessage, index: number): boolean {
     && !message.content
 }
 
-// ===== Opciones del chat =====
-const optionsOpen = ref(false)
+// ===== Opciones =====
 const confirmClearOpen = ref(false)
-
-function requestClear(): void {
-  optionsOpen.value = false
-  confirmClearOpen.value = true
-}
-
-function soon(label: string): void {
-  optionsOpen.value = false
-  toast.add({ title: `${label} · Próximamente`, icon: 'i-lucide-sparkles' })
-}
-
 function confirmClear(): void {
   stop()
   messages.value = []
@@ -149,214 +110,136 @@ function confirmClear(): void {
 </script>
 
 <template>
-  <div class="chat-page">
-    <!-- ============ Header ============ -->
-    <header class="chat-hdr">
-      <div class="chat-avatar" aria-hidden="true">
-        <img src="/img/logo.svg" alt="">
-      </div>
-      <div class="chat-titles">
-        <h1 class="chat-title"><img src="/img/gastronomia-logo.svg" alt="GastronomIA" class="chat-title-logo"></h1>
-        <div class="chat-subtitle">
-          <span class="live-dot" aria-hidden="true" />
-          Tu asistente de cocina IA
+  <div class="chat" :class="{ 'is-empty': messages.length === 0 }">
+    <!-- ============ Estado inicial: consola de consultas ============ -->
+    <section v-if="messages.length === 0" class="intro">
+      <div class="intro-top">
+        <div>
+          <p class="eyebrow">Chat analítico · lenguaje natural → SQL</p>
+          <h1 class="intro-h display">
+            ¿Qué querés saber<template v-if="firstName">, {{ firstName }}</template>?
+          </h1>
+          <p class="intro-sub">
+            Escribí una pregunta sobre tus ventas, márgenes o stock. Armo la consulta
+            sobre tus datos y te respondo con los números reales.
+          </p>
         </div>
       </div>
-      <button class="icon-btn" aria-label="Más opciones" @click="optionsOpen = true">
-        <UIcon name="i-lucide-more-horizontal" />
-      </button>
-    </header>
 
-    <!-- ============ Banner aprendizaje ============ -->
-    <div class="learn-banner" role="status">
-      <UIcon name="i-lucide-sparkles" aria-hidden="true" />
-      <span>
-        <b>Modo aprendizaje</b>
-        <span class="learn-sep"> · </span>
-        Pronto entenderé más preguntas
-      </span>
-    </div>
+      <div class="cats">
+        <div v-for="c in CATEGORIES" :key="c.label" class="cat">
+          <p class="cat-label">{{ c.label }}</p>
+          <ul class="q-list">
+            <li v-for="q in c.questions" :key="q">
+              <button type="button" class="q" @click="ask(q)">
+                <span class="q-text">{{ q }}</span>
+                <UIcon name="i-lucide-arrow-up-right" class="q-go" aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
 
     <!-- ============ Conversación ============ -->
-    <div class="chat-body" aria-live="polite">
-      <!-- Estado inicial: bienvenida + sugerencias -->
-      <template v-if="messages.length === 0">
-        <div class="msg-row ai">
-          <div class="msg-avatar" aria-hidden="true">
-            <img src="/img/logo.svg" alt="">
-          </div>
-          <div class="msg-stack">
-            <div class="bubble">
-              ¡Hola, <b>{{ firstName }}</b>! 👋 Soy <b>GastronomIA</b>, tu asistente inteligente.
-              Puedo ayudarte a entender tus ventas, márgenes, stock y más. Empieza preguntándome
-              algo o usa una de estas sugerencias:
-            </div>
-          </div>
-        </div>
+    <div v-else class="thread" aria-live="polite">
+      <div class="thread-bar">
+        <span class="thread-title">Conversación</span>
+        <button type="button" class="thread-clear" @click="confirmClearOpen = true">
+          <UIcon name="i-lucide-trash-2" /> Limpiar
+        </button>
+      </div>
 
-        <div class="sugg-block">
-          <div class="sugg-header">
-            <UIcon name="i-lucide-lightbulb" /> Pregúntame sobre
-          </div>
-          <div class="sugg-grid">
-            <button
-              v-for="s in visibleSuggestions"
-              :key="s.id"
-              type="button"
-              class="sugg-card"
-              :aria-label="`${s.label}: ${s.ex}`"
-              @click="pickSuggestion(s.ex)"
-            >
-              <span class="emoji" aria-hidden="true">{{ s.emoji }}</span>
-              <span class="label">{{ s.label }}</span>
-              <span class="ex">{{ s.ex }}</span>
-            </button>
-          </div>
-          <div class="sugg-more-wrap">
+      <div
+        v-for="(m, index) in messages"
+        :key="m.id"
+        class="msg"
+        :class="m.role === 'user' ? 'me' : 'ai'"
+      >
+        <span class="msg-tag">{{ m.role === 'user' ? 'Vos' : 'GastronomIA' }}</span>
+        <div class="bubble">
+          <!-- SQL generado (colapsable) -->
+          <div v-if="m.sql" class="sql">
             <button
               type="button"
-              class="sugg-more"
-              :class="{ open: suggestionsExpanded }"
-              :aria-expanded="suggestionsExpanded"
-              @click="suggestionsExpanded = !suggestionsExpanded"
+              class="sql-head"
+              :aria-expanded="!collapsedSql[m.id]"
+              @click="toggleSql(m.id)"
             >
-              {{ suggestionsExpanded ? 'Ver menos' : 'Ver más sugerencias' }}
-              <UIcon name="i-lucide-chevron-down" />
+              <UIcon name="i-lucide-database" /> SQL generado
+              <UIcon name="i-lucide-chevron-down" class="sql-chev" :class="{ open: !collapsedSql[m.id] }" />
             </button>
+            <pre v-show="!collapsedSql[m.id]" class="sql-code">{{ m.sql }}</pre>
+          </div>
+
+          <!-- Tabla de resultados -->
+          <div v-if="m.table" class="result-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th v-for="col in m.table.columns" :key="col">{{ col }}</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, ri) in m.table.rows" :key="ri">
+                  <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Respuesta -->
+          <p v-if="m.content" class="bubble-text">
+            <template v-for="(seg, si) in boldSegments(m.content)" :key="si">
+              <b v-if="seg.bold">{{ seg.text }}</b>
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </p>
+
+          <div v-if="showTyping(m, index)" class="typing" aria-label="Escribiendo">
+            <span /><span /><span />
           </div>
         </div>
-      </template>
+      </div>
+    </div>
 
-      <!-- Conversación activa -->
-      <template v-else>
-        <div class="date-sep" aria-label="Hoy">Hoy</div>
-
-        <div
-          v-for="(m, index) in messages"
-          :key="m.id"
-          class="msg-row"
-          :class="m.role === 'user' ? 'me' : 'ai'"
+    <!-- ============ Composer (input) ============ -->
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea
+          ref="inputEl"
+          v-model="text"
+          class="composer-input"
+          placeholder="Preguntá sobre tu negocio…"
+          rows="1"
+          aria-label="Escribe tu pregunta"
+          @keydown.enter.exact.prevent="send"
+        />
+        <button
+          v-if="streaming"
+          type="button"
+          class="composer-send stop"
+          aria-label="Detener respuesta"
+          @click="stop"
         >
-          <div class="msg-avatar" aria-hidden="true">
-            <img v-if="m.role === 'assistant'" src="/img/logo.svg" alt="">
-            <template v-else>{{ initials }}</template>
-          </div>
-          <div class="msg-stack">
-            <div class="bubble">
-              <!-- 1. SQL generado (colapsable) -->
-              <div v-if="m.sql" class="sql-block">
-                <button
-                  type="button"
-                  class="sql-head"
-                  :aria-expanded="!collapsedSql[m.id]"
-                  @click="toggleSql(m.id)"
-                >
-                  <UIcon name="i-lucide-database" />
-                  SQL generado
-                  <UIcon
-                    name="i-lucide-chevron-down"
-                    class="sql-chev"
-                    :class="{ open: !collapsedSql[m.id] }"
-                  />
-                </button>
-                <pre v-show="!collapsedSql[m.id]" class="sql-code">{{ m.sql }}</pre>
-              </div>
-
-              <!-- 2. Tabla de resultados -->
-              <div v-if="m.table" class="result-wrap">
-                <table class="result-table">
-                  <thead>
-                    <tr>
-                      <th v-for="col in m.table.columns" :key="col">{{ col }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(row, ri) in m.table.rows" :key="ri">
-                      <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <!-- 3. Respuesta en texto (con **bold**) -->
-              <p v-if="m.content" class="bubble-text">
-                <template v-for="(seg, si) in boldSegments(m.content)" :key="si">
-                  <b v-if="seg.bold">{{ seg.text }}</b>
-                  <template v-else>{{ seg.text }}</template>
-                </template>
-              </p>
-
-              <!-- Escribiendo… -->
-              <div v-if="showTyping(m, index)" class="typing" aria-label="GastronomIA está escribiendo">
-                <span /><span /><span />
-              </div>
-            </div>
-            <span class="msg-time">{{ formatTime(m.createdAt) }}</span>
-          </div>
-        </div>
-      </template>
-    </div>
-
-    <!-- ============ Input fijo ============ -->
-    <div class="input-bar">
-      <div class="input-inner">
-        <div class="input-card">
-          <button type="button" class="mic-btn" aria-label="Dictar mensaje por voz" @click="onMic">
-            <UIcon name="i-lucide-mic" />
-          </button>
-          <textarea
-            ref="inputEl"
-            v-model="text"
-            class="text-input"
-            :placeholder="PLACEHOLDERS[placeholderIdx]"
-            rows="1"
-            aria-label="Escribe tu pregunta"
-            @keydown.enter.exact.prevent="send"
-          />
-          <button
-            v-if="streaming"
-            type="button"
-            class="send-btn stop"
-            aria-label="Detener respuesta"
-            @click="stop"
-          >
-            <UIcon name="i-lucide-square" />
-          </button>
-          <button
-            v-else
-            type="button"
-            class="send-btn"
-            :class="{ active: hasText }"
-            :disabled="!hasText"
-            aria-label="Enviar pregunta"
-            @click="send"
-          >
-            <UIcon name="i-lucide-send" />
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ Sheet de opciones ============ -->
-    <UiBottomSheet v-model="optionsOpen" title="Opciones del chat">
-      <div class="sheet-rows">
-        <button type="button" class="sheet-row danger" @click="requestClear">
-          <UIcon name="i-lucide-trash-2" /> Limpiar conversación
+          <UIcon name="i-lucide-square" />
         </button>
-        <button type="button" class="sheet-row" @click="soon('Historial completo')">
-          <UIcon name="i-lucide-history" /> Historial completo
-        </button>
-        <button type="button" class="sheet-row" @click="soon('Configurar IA')">
-          <UIcon name="i-lucide-settings-2" /> Configurar IA
+        <button
+          v-else
+          type="button"
+          class="composer-send"
+          :class="{ active: hasText }"
+          :disabled="!hasText"
+          aria-label="Enviar pregunta"
+          @click="send"
+        >
+          <UIcon name="i-lucide-arrow-up" />
         </button>
       </div>
-    </UiBottomSheet>
+      <p class="composer-hint">Las respuestas se calculan sobre tus datos en tiempo real.</p>
+    </div>
 
-    <!-- ============ Confirmación limpiar ============ -->
+    <!-- Confirmación limpiar -->
     <UiBottomSheet v-model="confirmClearOpen" title="¿Limpiar la conversación?">
-      <p class="confirm-text">
-        Volverás al estado inicial con el mensaje de bienvenida. Esta acción no se puede deshacer.
-      </p>
+      <p class="confirm-text">Volverás al estado inicial. Esta acción no se puede deshacer.</p>
       <template #cta>
         <div class="confirm-actions">
           <button class="btn btn-ghost" type="button" @click="confirmClearOpen = false">Cancelar</button>
@@ -368,436 +251,202 @@ function confirmClear(): void {
 </template>
 
 <style scoped>
-.chat-page {
-  max-width: 760px;
+.chat {
+  width: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============ Estado inicial: consola full-width ============ */
+.intro {
+  width: 100%;
+  max-width: 1180px;
   margin: 0 auto;
-}
-
-/* ============ Header ============ */
-.chat-hdr {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px;
-  display: flex; align-items: center; gap: 12px;
-  background: rgba(243, 237, 228, 0.72);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-bottom: 1px solid var(--border-subtle);
-}
-@media (min-width: 1024px) {
-  .chat-hdr { padding-top: 28px; }
-}
-.chat-avatar {
-  width: 44px; height: 44px;
-  border-radius: 12px;
-  background: radial-gradient(120% 120% at 15% 15%, var(--terracotta-300) 0%, var(--terracotta) 55%, var(--terracotta-700) 100%);
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-  position: relative;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 6px rgba(168, 84, 47, 0.18);
-}
-.chat-avatar img {
-  width: 28px; height: 28px;
-  display: block;
-  filter: brightness(0) invert(1);
-  opacity: 0.95;
-}
-.chat-avatar::after {
-  content: '';
-  position: absolute;
-  bottom: -2px; right: -2px;
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  background: var(--oliva);
-  border: 2px solid var(--crema);
-}
-.chat-titles { flex: 1; min-width: 0; line-height: 1.1; }
-.chat-title { margin: 0; display: flex; }
-.chat-title-logo { height: 18px; width: auto; display: block; }
-.chat-subtitle {
-  font-size: 12px; color: var(--fg3);
-  margin-top: 3px;
-  display: flex; align-items: center; gap: 6px;
-}
-.live-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--oliva);
-  display: inline-block;
-}
-/* .icon-btn viene del global components.css */
-
-/* ============ Banner aprendizaje ============ */
-.learn-banner {
-  margin: 8px 20px 0;
-  background: var(--mostaza-100);
-  border: 1px solid rgba(176, 130, 46, 0.18);
-  border-radius: 10px;
-  padding: 8px 12px;
-  display: flex; align-items: center; gap: 10px;
-  font-size: 12px;
-  color: var(--mostaza-700);
-}
-.learn-banner .iconify { width: 14px; height: 14px; flex-shrink: 0; }
-.learn-banner b { color: var(--espresso-800); font-weight: 600; }
-.learn-sep { color: rgba(176, 130, 46, 0.5); }
-
-/* ============ Conversación ============ */
-.chat-body {
-  padding: 16px 20px 96px;
-  display: flex; flex-direction: column; gap: 14px;
-}
-
-.date-sep {
-  display: flex; align-items: center; gap: 10px;
-  color: var(--fg3);
-  font-size: 11px; font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin: 6px 4px;
-}
-.date-sep::before,
-.date-sep::after {
-  content: '';
+  padding: clamp(28px, 6vh, 72px) clamp(20px, 4vw, 40px) 32px;
   flex: 1;
-  height: 1px;
-  background: var(--border-subtle);
+}
+.intro-top { margin-bottom: clamp(28px, 5vh, 48px); }
+.intro-h {
+  font-size: clamp(32px, 4.5vw, 56px);
+  margin: 10px 0 0;
+  max-width: 18ch;
+}
+.intro-sub {
+  margin-top: 16px;
+  font-size: clamp(15px, 1.6vw, 18px);
+  line-height: 1.55;
+  color: var(--fg2);
+  max-width: 52ch;
+  text-wrap: pretty;
 }
 
-.msg-row {
-  display: flex; gap: 8px;
-  max-width: 92%;
-  align-items: flex-end;
+/* Catálogo de consultas: grid de pared a pared */
+.cats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: clamp(20px, 3vw, 40px) clamp(24px, 4vw, 56px);
 }
-.msg-row.ai { align-self: flex-start; }
-.msg-row.me { align-self: flex-end; flex-direction: row-reverse; }
-
-.msg-avatar {
-  width: 26px; height: 26px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700;
+.cat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg3);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
-.msg-row.ai .msg-avatar {
-  background: radial-gradient(120% 120% at 15% 15%, var(--terracotta-300) 0%, var(--terracotta) 55%, var(--terracotta-700) 100%);
-  color: var(--crema-100);
-  padding: 4px;
+.q-list { list-style: none; padding: 0; margin: 0; }
+.q {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 13px 2px;
+  font-family: inherit;
+  font-size: 14.5px;
+  color: var(--fg1);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-standard), padding var(--dur) var(--ease-standard);
 }
-.msg-row.ai .msg-avatar img {
-  width: 100%; height: 100%;
-  filter: brightness(0) invert(1);
-  opacity: 0.95;
+.q:hover { color: var(--terracotta-700); padding-left: 8px; }
+.q-text { line-height: 1.4; }
+.q-go {
+  width: 15px; height: 15px; flex-shrink: 0;
+  color: var(--fg3);
+  opacity: 0; transform: translate(-4px, 2px);
+  transition: opacity var(--dur), transform var(--dur), color var(--dur);
 }
-.msg-row.me .msg-avatar {
-  background: var(--espresso-800);
-  color: var(--crema-100);
-}
+.q:hover .q-go { opacity: 1; transform: translate(0, 0); color: var(--terracotta-700); }
 
-.msg-stack {
-  display: flex; flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
+/* ============ Conversación ============ */
+.thread {
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  flex: 1;
+  padding: clamp(20px, 4vh, 36px) clamp(20px, 4vw, 32px) 140px;
+  display: flex; flex-direction: column; gap: 22px;
 }
-.msg-row.me .msg-stack { align-items: flex-end; }
+.thread-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.thread-title {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg3);
+}
+.thread-clear {
+  background: transparent; border: none; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; color: var(--fg3);
+}
+.thread-clear:hover { color: var(--danger); }
+.thread-clear .iconify { width: 13px; height: 13px; }
 
+.msg { display: flex; flex-direction: column; gap: 6px; max-width: 86%; }
+.msg.ai { align-self: flex-start; }
+.msg.me { align-self: flex-end; align-items: flex-end; }
+.msg-tag {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg3); padding: 0 2px;
+}
 .bubble {
-  font-size: 14px;
-  line-height: 1.5;
-  padding: 10px 14px;
-  border-radius: 14px;
-  max-width: 100%;
+  font-size: 14.5px; line-height: 1.55;
+  padding: 12px 16px;
+  border-radius: 16px;
   word-wrap: break-word;
 }
-.msg-row.ai .bubble {
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  color: var(--fg1);
-  border-top-left-radius: 4px;
+.msg.ai .bubble {
+  background: var(--bg-card); border: 1px solid var(--border-subtle); color: var(--fg1);
+  border-top-left-radius: 5px;
 }
-.msg-row.me .bubble {
-  background: var(--espresso-800);
-  color: var(--crema-100);
-  border-top-right-radius: 4px;
+.msg.me .bubble {
+  background: var(--espresso-800); color: var(--crema-100);
+  border-top-right-radius: 5px;
 }
 .bubble b { font-weight: 600; }
 .bubble-text { margin: 0; }
 
-.msg-time {
-  font-size: 10.5px;
-  color: var(--fg3);
-  font-family: var(--font-mono);
-  padding: 0 4px;
-}
-
-/* ============ Bloque SQL ============ */
-.sql-block {
-  margin: 2px 0 10px;
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--espresso-800);
-}
+/* SQL */
+.sql { margin: 0 0 10px; border-radius: 10px; overflow: hidden; background: var(--espresso); }
 .sql-head {
-  width: 100%;
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 10px;
-  background: transparent;
-  border: none;
-  color: var(--crema-200);
-  font-family: inherit;
-  font-size: 10.5px; font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
+  width: 100%; display: flex; align-items: center; gap: 6px; padding: 8px 11px;
+  background: transparent; border: none; color: var(--crema-200); font-family: inherit;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
 }
 .sql-head .iconify { width: 13px; height: 13px; }
-.sql-chev {
-  margin-left: auto;
-  transition: transform var(--dur) var(--ease-standard);
-}
+.sql-chev { margin-left: auto; transition: transform var(--dur); }
 .sql-chev.open { transform: rotate(180deg); }
 .sql-code {
-  margin: 0;
-  padding: 10px 12px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: #E8DFD2;
-  white-space: pre-wrap;
-  word-break: break-word;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 0; padding: 10px 12px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55;
+  color: #E8DFD2; white-space: pre-wrap; word-break: break-word; border-top: 1px solid rgba(255,255,255,0.08);
 }
 
-/* ============ Tabla de resultados ============ */
-.result-wrap {
-  margin: 2px 0 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  overflow-x: auto;
-}
-.result-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
+/* Tabla */
+.result-wrap { margin: 0 0 10px; border: 1px solid var(--border-subtle); border-radius: 10px; overflow-x: auto; }
+.result-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .result-table th {
-  background: var(--crema-100);
-  font-size: 10px; font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--fg3);
-  text-align: left;
-  padding: 7px 10px;
-  white-space: nowrap;
+  background: var(--crema-100); font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--fg3); text-align: left; padding: 8px 11px; white-space: nowrap;
 }
-.result-table td {
-  padding: 7px 10px;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--fg1);
-  white-space: nowrap;
-}
-.result-table td:not(:first-child) {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg2);
-}
+.result-table td { padding: 8px 11px; border-top: 1px solid var(--border-subtle); color: var(--fg1); white-space: nowrap; }
+.result-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
 
-/* ============ Typing ============ */
-.typing {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 0;
-}
-.typing span {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--terracotta);
-  opacity: 0.4;
-  animation: typingBounce 1.2s var(--ease-standard) infinite;
-}
+/* Typing */
+.typing { display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; }
+.typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--terracotta); opacity: 0.4; animation: tb 1.2s var(--ease-standard) infinite; }
 .typing span:nth-child(2) { animation-delay: 0.15s; }
 .typing span:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typingBounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-4px); opacity: 1; }
-}
+@keyframes tb { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
 
-/* ============ Sugerencias ============ */
-.sugg-block { margin-top: 6px; }
-.sugg-header {
-  font-size: 12px; font-weight: 600;
-  color: var(--fg2);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: flex; align-items: center; gap: 6px;
-  margin: 18px 4px 10px;
-}
-.sugg-header .iconify { width: 14px; height: 14px; color: var(--mostaza-700); }
-
-.sugg-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-@media (min-width: 640px) {
-  .sugg-grid { grid-template-columns: repeat(4, 1fr); }
-}
-.sugg-card {
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  padding: 12px;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-  display: flex; flex-direction: column; gap: 4px;
-  min-height: 86px;
-  transition: border-color var(--dur), background var(--dur), transform 80ms;
-}
-.sugg-card:hover { border-color: var(--terracotta-300); background: var(--crema-50); }
-.sugg-card:active { transform: scale(0.98); }
-.sugg-card .emoji { font-size: 18px; line-height: 1; margin-bottom: 2px; }
-.sugg-card .label {
-  font-size: 14px; font-weight: 600;
-  color: var(--fg1);
-  letter-spacing: -0.01em;
-}
-.sugg-card .ex {
-  font-size: 12px; color: var(--fg3);
-  line-height: 1.35;
-}
-
-.sugg-more-wrap { display: flex; justify-content: center; }
-.sugg-more {
-  margin-top: 10px;
-  background: transparent;
-  border: none;
-  color: var(--terracotta-700);
-  font-family: inherit;
-  font-size: 13px; font-weight: 600;
-  cursor: pointer;
-  padding: 8px 12px;
-  display: inline-flex; align-items: center; gap: 6px;
-}
-.sugg-more:hover { color: var(--terracotta); }
-.sugg-more .iconify { width: 14px; height: 14px; transition: transform var(--dur); }
-.sugg-more.open .iconify { transform: rotate(180deg); }
-
-/* ============ Input bar fija ============ */
-.input-bar {
-  position: fixed;
-  left: 0; right: 0;
+/* ============ Composer ============ */
+.composer {
+  position: fixed; left: 0; right: 0;
   bottom: calc(68px + env(safe-area-inset-bottom, 0px));
   z-index: 30;
-  padding: 8px 12px 10px;
-  background: linear-gradient(to bottom, rgba(243, 237, 228, 0) 0%, var(--crema-100) 30%);
+  padding: 10px 16px 12px;
+  background: linear-gradient(to bottom, transparent 0%, var(--bg) 36%);
 }
 @media (min-width: 1024px) {
-  .input-bar {
-    left: 256px;
-    bottom: 0;
-    padding: 12px 24px 24px;
-  }
-  .chat-body { padding-bottom: 110px; }
+  .composer { left: 256px; bottom: 0; padding: 14px 32px 26px; }
 }
-.input-inner {
-  max-width: 720px;
-  margin: 0 auto;
-}
-.input-card {
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  border-radius: 22px;
-  padding: 6px 6px 6px 10px;
-  display: flex; align-items: center; gap: 6px;
-  box-shadow: 0 2px 8px rgba(26, 26, 26, 0.04);
+.composer-inner {
+  max-width: 820px; margin: 0 auto;
+  display: flex; align-items: flex-end; gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px 8px 8px 16px;
   transition: border-color var(--dur);
 }
-.input-card:focus-within {
-  border-color: var(--terracotta-300);
-  box-shadow: 0 0 0 3px rgba(201, 106, 67, 0.12), 0 2px 8px rgba(26, 26, 26, 0.04);
+.composer-inner:focus-within { border-color: var(--terracotta-300); box-shadow: 0 0 0 3px rgba(201,106,67,0.10); }
+.composer-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  font-family: inherit; font-size: 15px; color: var(--fg1);
+  padding: 7px 0; resize: none; max-height: 120px; line-height: 1.45;
 }
-.mic-btn {
-  width: 34px; height: 34px;
-  border-radius: 50%;
-  background: var(--crema-100);
-  border: none;
+.composer-input::placeholder { color: var(--fg3); }
+.composer-send {
+  width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
+  background: var(--crema-200); border: none; color: var(--fg3); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--fg2);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background var(--dur);
-}
-.mic-btn:hover { background: var(--crema-200); color: var(--fg1); }
-.mic-btn .iconify { width: 16px; height: 16px; }
-
-.text-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: inherit;
-  font-size: 14px;
-  color: var(--fg1);
-  padding: 8px 4px;
-  resize: none;
-  max-height: 100px;
-  line-height: 1.4;
-}
-.text-input::placeholder { color: var(--fg3); }
-
-.send-btn {
-  width: 34px; height: 34px;
-  border-radius: 50%;
-  background: var(--crema-200);
-  border: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--fg3);
-  cursor: pointer;
-  flex-shrink: 0;
   transition: background var(--dur), color var(--dur), transform 80ms;
 }
-.send-btn.active {
-  background: var(--terracotta);
-  color: var(--crema-100);
+.composer-send.active { background: var(--terracotta); color: var(--crema-100); }
+.composer-send.active:hover { background: var(--terracotta-700); }
+.composer-send.stop { background: var(--espresso-800); color: var(--crema-100); }
+.composer-send:active { transform: scale(0.94); }
+.composer-send .iconify { width: 17px; height: 17px; }
+.composer-hint {
+  max-width: 820px; margin: 7px auto 0; padding: 0 4px;
+  font-size: 11px; color: var(--fg3); text-align: center;
 }
-.send-btn.active:hover { background: var(--terracotta-700); }
-.send-btn:active { transform: scale(0.94); }
-.send-btn.stop {
-  background: var(--espresso-800);
-  color: var(--crema-100);
-}
-.send-btn .iconify { width: 16px; height: 16px; }
+@media (max-width: 1023px) { .composer-hint { display: none; } }
 
-/* ============ Sheets ============ */
-.sheet-rows { display: flex; flex-direction: column; }
-.sheet-row {
-  width: 100%;
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 12px;
-  background: transparent;
-  border: none;
-  border-radius: 10px;
-  font-family: inherit;
-  font-size: 15px; font-weight: 500;
-  color: var(--fg1);
-  cursor: pointer;
-  text-align: left;
-}
-.sheet-row:hover { background: var(--crema-200); }
-.sheet-row.danger { color: var(--danger); }
-.sheet-row .iconify { width: 18px; height: 18px; }
-.sheet-row + .sheet-row { border-top: 1px solid var(--border-subtle); }
-
-.confirm-text {
-  margin: 0;
-  font-size: 13.5px;
-  color: var(--fg2);
-  line-height: 1.5;
-}
-.confirm-actions {
-  display: flex; gap: 8px; justify-content: flex-end;
-}
+.confirm-text { margin: 0; font-size: 13.5px; color: var(--fg2); line-height: 1.5; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 </style>
