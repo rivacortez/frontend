@@ -126,7 +126,7 @@ const pad = (n: number): string => String(n).padStart(2, '0')
         <button class="icon-btn" aria-label="Actualizar" @click="refresh()">
           <UIcon name="i-lucide-refresh-cw" />
         </button>
-        <NuxtLink to="/app/settings/tables" class="icon-btn" aria-label="Configurar mesas">
+        <NuxtLink to="/app/ajustes/mesas" class="icon-btn" aria-label="Configurar mesas">
           <UIcon name="i-lucide-sliders-horizontal" />
         </NuxtLink>
       </div>
@@ -245,7 +245,7 @@ const pad = (n: number): string => String(n).padStart(2, '0')
             <b>{{ formatPEN(amount) }}</b>
           </div>
         </div>
-        <NuxtLink to="/app/invoices" class="btn btn-dark btn-block" style="margin-top: 14px">
+        <NuxtLink to="/app/comprobantes" class="btn btn-dark btn-block" style="margin-top: 14px">
           <UIcon name="i-lucide-receipt" /> Ver comprobantes
         </NuxtLink>
       </div>

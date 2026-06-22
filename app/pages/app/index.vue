@@ -24,7 +24,7 @@ const dateLabel = computed(() => {
 
 /* ===================== KPIs reales · E07 dashboards =====================
    Cableado al backend vía los composables de reportes (BFF anti-corruption).
-   Gating por rol idéntico al hub /app/reports: owner → dashboard ejecutivo
+   Gating por rol idéntico al hub /app/reportes: owner → dashboard ejecutivo
    (admin), manager → operativo (manager), staff → caja del día (cajero, que
    es `read Sale`, NO 403). La moneda llega como string PEN → se formatea con
    formatPEN(num()). El owner consulta TAMBIÉN el dashboard del gerente para los
@@ -132,10 +132,10 @@ interface Shortcut {
 }
 
 const shortcuts: Shortcut[] = [
-  { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Costos y márgenes', to: '/app/recipes' },
-  { icon: 'i-lucide-scan-line', label: 'Escanear factura', sub: 'Magic Upload', to: '/app/data/magic-upload', featured: true },
-  { icon: 'i-lucide-shopping-cart', label: 'Compras', sub: 'Lista de compra', to: '/app/stock/shopping-list' },
-  { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'KPIs y análisis', to: '/app/reports' },
+  { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Costos y márgenes', to: '/app/recetas' },
+  { icon: 'i-lucide-scan-line', label: 'Escanear factura', sub: 'Magic Upload', to: '/app/datos/factura-ia', featured: true },
+  { icon: 'i-lucide-shopping-cart', label: 'Compras', sub: 'Lista de compra', to: '/app/inventario/lista-compras' },
+  { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'KPIs y análisis', to: '/app/reportes' },
 ]
 
 function notify(message: string): void {
@@ -159,7 +159,7 @@ function notify(message: string): void {
         </div>
       </div>
       <div class="hdr-actions">
-        <NuxtLink to="/app/notifications" class="icon-btn" :aria-label="`Notificaciones, ${unreadCount} sin leer`">
+        <NuxtLink to="/app/notificaciones" class="icon-btn" :aria-label="`Notificaciones, ${unreadCount} sin leer`">
           <UIcon name="i-lucide-bell" />
           <span v-if="unreadCount > 0" class="badge" aria-hidden="true">{{ unreadCount }}</span>
         </NuxtLink>
@@ -254,7 +254,7 @@ function notify(message: string): void {
           v-if="isOwner"
           role="listitem"
           class="kpi-card"
-          to="/app/reports"
+          to="/app/reportes"
           :aria-label="`Margen bruto: ${grossMarginPct ?? 0} por ciento`"
         >
           <div class="kpi-row-head">
@@ -275,7 +275,7 @@ function notify(message: string): void {
           v-else-if="isManager"
           role="listitem"
           class="kpi-card"
-          to="/app/stock"
+          to="/app/inventario"
           :aria-label="`Stock bajo: ${lowStockCount ?? 0} insumos`"
         >
           <div class="kpi-row-head">
@@ -312,12 +312,12 @@ function notify(message: string): void {
       <div v-if="topDishes.length" class="topdishes">
         <div class="topdishes-head">
           <span class="topdishes-title">Top platos de hoy</span>
-          <NuxtLink to="/app/reports" class="topdishes-link">Ver reportes</NuxtLink>
+          <NuxtLink to="/app/reportes" class="topdishes-link">Ver reportes</NuxtLink>
         </div>
         <NuxtLink
           v-for="(d, i) in topDishes.slice(0, 3)"
           :key="d.name"
-          to="/app/reports"
+          to="/app/reportes"
           class="topdish"
           :aria-label="`${i + 1}. ${d.name}: ${formatPEN(d.revenue)}, ${d.qty} unidades`"
         >
@@ -365,7 +365,7 @@ function notify(message: string): void {
               <button class="btn btn-primary" @click="notify('Ajuste de precio — Sprint 2 (E04)')">
                 <UIcon name="i-lucide-tag" /> Ajustar precio
               </button>
-              <NuxtLink class="btn btn-ghost" to="/app/recipes/rec-ceviche-clasico">
+              <NuxtLink class="btn btn-ghost" to="/app/recetas/rec-ceviche-clasico">
                 Ver detalles
               </NuxtLink>
             </div>
@@ -385,7 +385,7 @@ function notify(message: string): void {
               <span class="stock-pill">Cilantro <span class="qty">200 g</span></span>
             </div>
             <div class="alert-actions">
-              <NuxtLink class="btn btn-dark" to="/app/stock/shopping-list">
+              <NuxtLink class="btn btn-dark" to="/app/inventario/lista-compras">
                 <UIcon name="i-lucide-list-checks" /> Ver lista de compra
               </NuxtLink>
             </div>

@@ -35,48 +35,48 @@ function findChromium() {
 /** Rutas de la app (requieren sesión). */
 const APP_ROUTES = [
   ['app-home', '/app'],
-  ['reports', '/app/reports'],
+  ['reports', '/app/reportes'],
   ['pos-mesas', '/app/pos'],
   ['pos-mesa-detalle', '/app/pos/mesa/mesa-1'],
-  ['pos-split', '/app/pos/mesa/mesa-3/split'],
-  ['recipes-list', '/app/recipes'],
-  ['recipes-detail', '/app/recipes/rec-ceviche-clasico'],
-  ['recipes-new', '/app/recipes/new'],
-  ['stock', '/app/stock'],
-  ['stock-move', '/app/stock/move'],
-  ['stock-movements', '/app/stock/movements'],
-  ['stock-shopping', '/app/stock/shopping-list'],
-  ['stock-product', '/app/stock/product/ing-01'],
-  ['invoices', '/app/invoices'],
-  ['invoice-detail', '/app/invoices/sale-1'],
-  ['notifications', '/app/notifications'],
-  ['profile', '/app/profile'],
-  ['help', '/app/help'],
+  ['pos-split', '/app/pos/mesa/mesa-3/dividir'],
+  ['recipes-list', '/app/recetas'],
+  ['recipes-detail', '/app/recetas/rec-ceviche-clasico'],
+  ['recipes-new', '/app/recetas/nueva'],
+  ['stock', '/app/inventario'],
+  ['stock-move', '/app/inventario/movimiento'],
+  ['stock-movements', '/app/inventario/movimientos'],
+  ['stock-shopping', '/app/inventario/lista-compras'],
+  ['stock-product', '/app/inventario/producto/ing-01'],
+  ['invoices', '/app/comprobantes'],
+  ['invoice-detail', '/app/comprobantes/sale-1'],
+  ['notifications', '/app/notificaciones'],
+  ['profile', '/app/perfil'],
+  ['help', '/app/ayuda'],
   ['menu', '/app/menu'],
-  ['data-import', '/app/data/import'],
-  ['data-export', '/app/data/export'],
-  ['magic-upload', '/app/data/magic-upload'],
-  ['settings-hub', '/app/settings'],
-  ['settings-business', '/app/settings/business'],
-  ['settings-hours', '/app/settings/hours'],
-  ['settings-payments', '/app/settings/payments'],
-  ['settings-tables', '/app/settings/tables'],
-  ['settings-tax', '/app/settings/tax'],
-  ['settings-menu', '/app/settings/menu'],
+  ['data-import', '/app/datos/importar'],
+  ['data-export', '/app/datos/exportar'],
+  ['magic-upload', '/app/datos/factura-ia'],
+  ['settings-hub', '/app/ajustes'],
+  ['settings-business', '/app/ajustes/negocio'],
+  ['settings-hours', '/app/ajustes/horarios'],
+  ['settings-payments', '/app/ajustes/pagos'],
+  ['settings-tables', '/app/ajustes/mesas'],
+  ['settings-tax', '/app/ajustes/impuestos'],
+  ['settings-menu', '/app/ajustes/carta'],
 ]
 
 const PUBLIC_ROUTES = [
   ['landing', '/'],
-  ['welcome', '/welcome'],
-  ['login', '/login'],
-  ['forgot', '/forgot'],
+  ['welcome', '/bienvenida'],
+  ['login', '/ingresar'],
+  ['forgot', '/recuperar'],
 ]
 
 const DESKTOP_ROUTES = [
   ['app-home', '/app'],
-  ['reports', '/app/reports'],
+  ['reports', '/app/reportes'],
   ['pos-mesas', '/app/pos'],
-  ['recipes-list', '/app/recipes'],
+  ['recipes-list', '/app/recetas'],
   ['chat', '/app/chat'],
   ['landing', '/'],
 ]
@@ -89,7 +89,7 @@ async function snap(page, name, suffix = 'mobile') {
 }
 
 async function login(page) {
-  await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}/ingresar`, { waitUntil: 'networkidle' })
   await page.fill('input[type="email"]', DEMO_EMAIL)
   await page.fill('input[type="password"]', DEMO_PASSWORD)
   await page.click('button[type="submit"]')
@@ -124,29 +124,29 @@ for (const [name, route] of PUBLIC_ROUTES) {
 }
 
 console.log('— Flujo onboarding (móvil)')
-await page.goto(`${BASE}/onboarding`, { waitUntil: 'networkidle' })
+await page.goto(`${BASE}/registro`, { waitUntil: 'networkidle' })
 await snap(page, 'onboarding-1-cuenta')
 await page.fill('input[type="text"]', 'Eduardo Ventura')
 await page.fill('input[type="email"]', 'eduardo@demo.pe')
 await page.fill('input[type="password"]', 'demo12345')
 await page.click('footer button, .ob-cta button')
-await page.waitForURL('**/onboarding/verify', { timeout: 8000 })
+await page.waitForURL('**/registro/verificar', { timeout: 8000 })
 await page.fill('.vf-digit', '123456')
 await snap(page, 'onboarding-2-verify')
 await page.click('.ob-cta button')
-await page.waitForURL('**/onboarding/restaurant', { timeout: 8000 })
+await page.waitForURL('**/registro/restaurante', { timeout: 8000 })
 await page.fill('input[placeholder*="Motif"]', 'La Cevichería Demo')
 await page.click('.rs-cuisine >> nth=1')
 await snap(page, 'onboarding-3-restaurant')
 await page.click('.ob-cta button')
-await page.waitForURL('**/onboarding/setup', { timeout: 8000 })
+await page.waitForURL('**/registro/configuracion', { timeout: 8000 })
 await snap(page, 'onboarding-4-setup')
 await page.click('.ob-cta button >> nth=0')
-await page.waitForURL('**/onboarding/import', { timeout: 8000 })
+await page.waitForURL('**/registro/importar', { timeout: 8000 })
 await page.click('.im-source >> nth=0')
 await snap(page, 'onboarding-5-import')
 await page.click('.ob-cta button')
-await page.waitForURL('**/onboarding/done', { timeout: 8000 })
+await page.waitForURL('**/registro/listo', { timeout: 8000 })
 await snap(page, 'onboarding-6-done')
 
 console.log('— App (móvil, sesión demo)')

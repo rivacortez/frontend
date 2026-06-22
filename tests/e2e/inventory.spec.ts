@@ -63,8 +63,8 @@ async function setMinStock(page: import('@playwright/test').Page, min: number): 
 }
 
 test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () => {
-  // ===== Stock: ver un insumo con stock y estado en /app/stock =====
-  test('insumo con stock y mínimo aparece en /app/stock con su estado (Bajo)', async ({ owner, request }) => {
+  // ===== Stock: ver un insumo con stock y estado en /app/inventario =====
+  test('insumo con stock y mínimo aparece en /app/inventario con su estado (Bajo)', async ({ owner, request }) => {
     const seed = apiSeeder(request, owner.token)
     const ing = await seedIngredientWithCat(seed, 'Tomate E2E', 'Verduras y frutas', 10)
     // Stock inicial 50 (vía API). El mínimo se fija por la UI más abajo.
@@ -72,7 +72,7 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
 
     // Fijar minStock = 60 por la UI (sheet "Editar insumo" en el detalle del producto).
     // 50/60 = 0.83 → estado "low" (Bajo).
-    await gotoHydrated(owner.page, `/app/stock/product/${ing.id}`)
+    await gotoHydrated(owner.page, `/app/inventario/producto/${ing.id}`)
     await expect(owner.page.getByRole('heading', { name: 'Tomate E2E' })).toBeVisible()
 
     await setMinStock(owner.page, 60)
@@ -80,20 +80,20 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
     // El detalle ya refleja mínimo 60 y estado "Stock Bajo".
     await expect(owner.page.getByText('Stock Bajo')).toBeVisible()
 
-    // En la lista /app/stock el insumo aparece con su estado "Bajo".
-    await gotoHydrated(owner.page, '/app/stock')
+    // En la lista /app/inventario el insumo aparece con su estado "Bajo".
+    await gotoHydrated(owner.page, '/app/inventario')
     const row = owner.page.locator('.stk-row', { hasText: 'Tomate E2E' })
     await expect(row).toBeVisible()
     await expect(row.locator('.stk-status-dot')).toContainText('Bajo')
   })
 
-  // ===== Movimiento: registrar una ENTRADA en /app/stock/move y verificar que sube el stock =====
-  test('registrar una entrada en /app/stock/move sube el stock', async ({ owner, request }) => {
+  // ===== Movimiento: registrar una ENTRADA en /app/inventario/movimiento y verificar que sube el stock =====
+  test('registrar una entrada en /app/inventario/movimiento sube el stock', async ({ owner, request }) => {
     const seed = apiSeeder(request, owner.token)
     const ing = await seed.ingredient(sku(), 'Cebolla E2E', 8)
     await seed.movement(ing.id, 'purchase', 10) // stock inicial 10
 
-    await gotoHydrated(owner.page, '/app/stock/move')
+    await gotoHydrated(owner.page, '/app/inventario/movimiento')
     // "Entrada" es el tipo por defecto, pero lo seleccionamos explícitamente (resiliente).
     await owner.page.getByRole('radio', { name: /entrada/i }).click()
 
@@ -109,25 +109,25 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
     // Motivo (entrada): Compra.
     await owner.page.getByRole('radio', { name: /Compra/i }).click()
 
-    // Registrar → navega a /app/stock.
+    // Registrar → navega a /app/inventario.
     await Promise.all([
       owner.page.waitForURL(/\/app\/stock(\/|$)/),
       owner.page.getByRole('button', { name: /Registrar entrada/i }).click(),
     ])
 
     // Verificar el nuevo stock en el detalle del producto (15 kg).
-    await gotoHydrated(owner.page, `/app/stock/product/${ing.id}`)
+    await gotoHydrated(owner.page, `/app/inventario/producto/${ing.id}`)
     const stockKv = owner.page.locator('.pd-kv', { hasText: 'Stock actual' })
     await expect(stockKv.locator('.value')).toContainText('15')
   })
 
   // ===== Movimiento: registrar una SALIDA reduce el stock =====
-  test('registrar una salida en /app/stock/move reduce el stock', async ({ owner, request }) => {
+  test('registrar una salida en /app/inventario/movimiento reduce el stock', async ({ owner, request }) => {
     const seed = apiSeeder(request, owner.token)
     const ing = await seed.ingredient(sku(), 'Papa E2E', 5)
     await seed.movement(ing.id, 'purchase', 20) // stock inicial 20
 
-    await gotoHydrated(owner.page, '/app/stock/move')
+    await gotoHydrated(owner.page, '/app/inventario/movimiento')
     await owner.page.getByRole('radio', { name: /salida/i }).click()
 
     await owner.page.getByPlaceholder('Buscar insumo…').fill('Papa E2E')
@@ -145,18 +145,18 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
       owner.page.getByRole('button', { name: /Registrar salida/i }).click(),
     ])
 
-    await gotoHydrated(owner.page, `/app/stock/product/${ing.id}`)
+    await gotoHydrated(owner.page, `/app/inventario/producto/${ing.id}`)
     const stockKv = owner.page.locator('.pd-kv', { hasText: 'Stock actual' })
     await expect(stockKv.locator('.value')).toContainText('15')
   })
 
-  // ===== Merma: registrar un desperdicio con razón → aparece en /app/stock/mermas =====
-  test('registrar una merma con razón aparece en /app/stock/mermas', async ({ owner, request }) => {
+  // ===== Merma: registrar un desperdicio con razón → aparece en /app/inventario/mermas =====
+  test('registrar una merma con razón aparece en /app/inventario/mermas', async ({ owner, request }) => {
     const seed = apiSeeder(request, owner.token)
     const ing = await seed.ingredient(sku(), 'Lechuga E2E', 4)
     await seed.movement(ing.id, 'purchase', 12) // stock inicial 12
 
-    await gotoHydrated(owner.page, '/app/stock/move')
+    await gotoHydrated(owner.page, '/app/inventario/movimiento')
     await owner.page.getByRole('radio', { name: /salida/i }).click()
 
     await owner.page.getByPlaceholder('Buscar insumo…').fill('Lechuga E2E')
@@ -177,7 +177,7 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
     ])
 
     // En Mermas debe aparecer la pérdida con su nombre, cantidad y costo total > 0.
-    await gotoHydrated(owner.page, '/app/stock/mermas')
+    await gotoHydrated(owner.page, '/app/inventario/mermas')
     const wasteRow = owner.page.locator('.wa-row', { hasText: 'Lechuga E2E' })
     await expect(wasteRow).toBeVisible()
     await expect(wasteRow).toContainText('Producto en mal estado E2E')
@@ -194,13 +194,13 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
     await seed.movement(ing.id, 'purchase', 20) // stock inicial 20
 
     // Fijar minStock = 20 por la UI. Tras una salida fuerte el stock cae a ≤ 50% → crítico.
-    await gotoHydrated(owner.page, `/app/stock/product/${ing.id}`)
+    await gotoHydrated(owner.page, `/app/inventario/producto/${ing.id}`)
     await setMinStock(owner.page, 20)
     // Con 20/20 el estado es OK al inicio.
     await expect(owner.page.getByText('Stock OK')).toBeVisible()
 
     // Salida de 14 → stock 6 (≤ 50% de 20) → crítico.
-    await gotoHydrated(owner.page, '/app/stock/move')
+    await gotoHydrated(owner.page, '/app/inventario/movimiento')
     await owner.page.getByRole('radio', { name: /salida/i }).click()
     await owner.page.getByPlaceholder('Buscar insumo…').fill('Aji E2E')
     await owner.page.getByRole('option', { name: /Aji E2E/i }).click()
@@ -212,14 +212,14 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
       owner.page.getByRole('button', { name: /Registrar salida/i }).click(),
     ])
 
-    // En /app/stock el insumo aparece como crítico (sección "Insumos Críticos" + estado "Crítico").
-    await gotoHydrated(owner.page, '/app/stock')
+    // En /app/inventario el insumo aparece como crítico (sección "Insumos Críticos" + estado "Crítico").
+    await gotoHydrated(owner.page, '/app/inventario')
     const row = owner.page.locator('.stk-row', { hasText: 'Aji E2E' })
     await expect(row).toBeVisible()
     await expect(row.locator('.stk-status-dot.crit')).toContainText('Crítico')
 
     // Y el detalle del producto lo confirma como "Stock Crítico".
-    await gotoHydrated(owner.page, `/app/stock/product/${ing.id}`)
+    await gotoHydrated(owner.page, `/app/inventario/producto/${ing.id}`)
     await expect(owner.page.getByText('Stock Crítico')).toBeVisible()
   })
 
@@ -231,7 +231,7 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
     // Proveedor (prerequisito vía API; el RUC tiene 11 dígitos como pide el backend).
     await seed.post('/api/suppliers', { name: 'Proveedor E2E', ruc: '20123456789' })
 
-    await gotoHydrated(owner.page, '/app/stock/purchase-orders')
+    await gotoHydrated(owner.page, '/app/inventario/ordenes-compra')
 
     // --- Crear OC (proveedor + 1 ítem: 30 × S/ 12 = S/ 360) ---
     await owner.page.getByRole('button', { name: /^Nueva$/i }).click()
@@ -276,12 +276,12 @@ test.describe('Inventario + Órdenes de Compra (E05) — owner por la UI', () =>
     await expect(detailSheet).toBeHidden()
 
     // El stock del insumo subió a 35 (5 + 10 + 20) por las recepciones.
-    await gotoHydrated(owner.page, `/app/stock/product/${ing.id}`)
+    await gotoHydrated(owner.page, `/app/inventario/producto/${ing.id}`)
     const stockKv = owner.page.locator('.pd-kv', { hasText: 'Stock actual' })
     await expect(stockKv.locator('.value')).toContainText('35')
 
     // --- Cancelar OTRA OC ---
-    await gotoHydrated(owner.page, '/app/stock/purchase-orders')
+    await gotoHydrated(owner.page, '/app/inventario/ordenes-compra')
     await owner.page.getByRole('button', { name: /^Nueva$/i }).click()
     const create2 = owner.page.getByRole('dialog', { name: /Nueva orden de compra/i })
     await create2.locator('.po-line-qty').first().fill('5')

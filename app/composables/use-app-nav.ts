@@ -12,7 +12,7 @@ export function useAppNav(): AppNavItem[] {
   return [
     { id: 'home', label: 'Inicio', icon: 'i-lucide-home', to: '/app', exact: true },
     { id: 'pos', label: 'Mesas', icon: 'i-lucide-utensils', to: '/app/pos' },
-    { id: 'stock', label: 'Stock', icon: 'i-lucide-package', to: '/app/stock' },
+    { id: 'stock', label: 'Inventario', icon: 'i-lucide-package', to: '/app/inventario' },
     { id: 'chat', label: 'Chat', icon: 'i-lucide-bot', to: '/app/chat', brand: true },
     { id: 'menu', label: 'Más', icon: 'i-lucide-more-horizontal', to: '/app/menu' },
   ]

@@ -82,7 +82,7 @@ async function handleAction(action: MesaAction, close: () => void): Promise<void
       }
       break
     case 'dividir':
-      await navigateTo(`/app/pos/mesa/${props.table.id}/split`)
+      await navigateTo(`/app/pos/mesa/${props.table.id}/dividir`)
       break
     case 'transferir':
       toast.add({ title: 'Transferir mesa', description: 'Disponible próximamente', icon: 'i-lucide-arrow-right-left' })

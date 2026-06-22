@@ -35,27 +35,27 @@ test.describe('Login', () => {
     await expect(page).toHaveURL(/\/app(\/|$)/)
   })
 
-  test('contraseña incorrecta → permanece en /login y muestra error', async ({ page, request }) => {
+  test('contraseña incorrecta → permanece en /ingresar y muestra error', async ({ page, request }) => {
     const t = await registerTenant(request)
-    await page.goto('/login')
+    await page.goto('/ingresar')
     await ready(page)
 
     await page.getByPlaceholder('tu@correo.com').fill(t.email)
     await page.getByPlaceholder('Tu contraseña').fill('contraseña-incorrecta')
     await page.getByRole('button', { name: /iniciar sesión/i }).click()
 
-    // Sigue en /login y aparece la alerta de credenciales inválidas.
+    // Sigue en /ingresar y aparece la alerta de credenciales inválidas.
     const alert = page.getByRole('alert')
     await expect(alert).toBeVisible()
     await expect(alert).toContainText(/credenciales inválidas/i)
-    await expect(page).toHaveURL(/\/login(\?|$)/)
+    await expect(page).toHaveURL(/\/ingresar(\?|$)/)
   })
 })
 
 /* ============ Logout + ruta protegida ============ */
 
 test.describe('Logout', () => {
-  test('cerrar sesión vuelve a /login; /app queda protegido', async ({ owner }) => {
+  test('cerrar sesión vuelve a /ingresar; /app queda protegido', async ({ owner }) => {
     const page = owner.page
 
     // El logout vive en "Más" (/app/menu) como botón "Cerrar sesión". En desktop
@@ -65,15 +65,15 @@ test.describe('Logout', () => {
     await ready(page)
     const logout = page.locator('main').getByRole('button', { name: /cerrar sesión/i })
     await Promise.all([
-      page.waitForURL(/\/login(\/|\?|$)/, { timeout: 20_000 }),
+      page.waitForURL(/\/ingresar(\/|\?|$)/, { timeout: 20_000 }),
       logout.click(),
     ])
-    await expect(page).toHaveURL(/\/login(\/|\?|$)/)
+    await expect(page).toHaveURL(/\/ingresar(\/|\?|$)/)
 
-    // Ya sin sesión, visitar /app redirige a /login (middleware auth.global).
+    // Ya sin sesión, visitar /app redirige a /ingresar (middleware auth.global).
     await page.goto('/app')
-    await page.waitForURL(/\/login(\/|\?|$)/, { timeout: 20_000 })
-    await expect(page).toHaveURL(/\/login/)
+    await page.waitForURL(/\/ingresar(\/|\?|$)/, { timeout: 20_000 })
+    await expect(page).toHaveURL(/\/ingresar/)
   })
 })
 
@@ -84,13 +84,13 @@ test.describe('Registro (onboarding)', () => {
     const email = uniqueEmail()
 
     // Paso 1 · Cuenta
-    await page.goto('/onboarding')
+    await page.goto('/registro')
     await ready(page)
     await page.getByLabel('Tu nombre').fill('Owner E2E')
     await page.getByLabel('Email', { exact: true }).fill(email)
     await page.getByLabel('Contraseña', { exact: true }).fill(SEED_PWD)
     await Promise.all([
-      page.waitForURL(/\/onboarding\/verify/, { timeout: 20_000 }),
+      page.waitForURL(/\/registro\/verificar/, { timeout: 20_000 }),
       page.getByRole('button', { name: /continuar/i }).click(),
     ])
 
@@ -100,7 +100,7 @@ test.describe('Registro (onboarding)', () => {
     // Pegar el código completo en el primer dígito (la página lo reparte).
     await digits.first().fill('123456')
     await Promise.all([
-      page.waitForURL(/\/onboarding\/restaurant/, { timeout: 20_000 }),
+      page.waitForURL(/\/registro\/restaurante/, { timeout: 20_000 }),
       page.getByRole('button', { name: /verificar/i }).click(),
     ])
 
@@ -109,14 +109,14 @@ test.describe('Registro (onboarding)', () => {
     await page.getByLabel('Nombre del restaurante').fill('Restobar E2E')
     await page.getByRole('radio', { name: 'Bar / Restobar' }).click()
     await Promise.all([
-      page.waitForURL(/\/onboarding\/setup/, { timeout: 20_000 }),
+      page.waitForURL(/\/registro\/configuracion/, { timeout: 20_000 }),
       page.getByRole('button', { name: /continuar/i }).click(),
     ])
 
     // Paso 4 · Configuración del local (los valores por defecto sirven)
     await ready(page)
     await Promise.all([
-      page.waitForURL(/\/onboarding\/import/, { timeout: 20_000 }),
+      page.waitForURL(/\/registro\/importar/, { timeout: 20_000 }),
       page.getByRole('button', { name: /continuar/i }).click(),
     ])
 
@@ -124,7 +124,7 @@ test.describe('Registro (onboarding)', () => {
     await ready(page)
     await page.getByRole('radio', { name: /empezar desde cero/i }).click()
     await Promise.all([
-      page.waitForURL(/\/onboarding\/done/, { timeout: 20_000 }),
+      page.waitForURL(/\/registro\/listo/, { timeout: 20_000 }),
       page.getByRole('button', { name: /empezar desde cero/i }).click(),
     ])
 
@@ -151,7 +151,7 @@ test.describe('Cambio de contraseña (HU-01-06)', () => {
     const NEW_PWD = 'NuevaClave123!@'
 
     // Abrir el formulario desde el perfil y enviar el cambio.
-    await owner.page.goto('/app/profile')
+    await owner.page.goto('/app/perfil')
     await ready(owner.page)
     await owner.page.getByRole('button', { name: /cambiar contraseña/i }).click()
     const sheet = owner.page.getByRole('dialog', { name: /cambiar contraseña/i })
@@ -173,17 +173,17 @@ test.describe('Cambio de contraseña (HU-01-06)', () => {
       await ctx.close()
     }
 
-    // La ANTIGUA contraseña ya no autentica → se queda en /login con alerta.
+    // La ANTIGUA contraseña ya no autentica → se queda en /ingresar con alerta.
     const ctx2 = await browser.newContext()
     const page2 = await ctx2.newPage()
     try {
-      await page2.goto('/login')
+      await page2.goto('/ingresar')
       await ready(page2)
       await page2.getByPlaceholder('tu@correo.com').fill(owner.email)
       await page2.getByPlaceholder('Tu contraseña').fill(SEED_PWD)
       await page2.getByRole('button', { name: /iniciar sesión/i }).click()
       await expect(page2.getByRole('alert')).toBeVisible()
-      await expect(page2).toHaveURL(/\/login/)
+      await expect(page2).toHaveURL(/\/ingresar/)
     }
     finally {
       await ctx2.close()

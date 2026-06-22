@@ -7,7 +7,7 @@
  *      fijo (entrar a una subpágina desde otra ruta debe regresar a esa ruta).
  *   3. Cableado al mock: los botones que operan sobre datos del mock persisten
  *      de verdad (no son toasts de juguete).
- *   4. Páginas: solo /app/reports debe caer al placeholder "en construcción".
+ *   4. Páginas: solo /app/reportes debe caer al placeholder "en construcción".
  *
  * Uso:  npm run test:ux            (requiere dev server en :3000)
  * Sale con código 1 si algo falla (apto para CI).
@@ -33,15 +33,15 @@ function findChromium() {
 }
 
 const APP_ROUTES = [
-  '/app', '/app/pos', '/app/pos/mesa/mesa-1', '/app/pos/mesa/mesa-3/split',
-  '/app/recipes', '/app/recipes/rec-ceviche-clasico', '/app/recipes/new',
-  '/app/stock', '/app/stock/move', '/app/stock/movements', '/app/stock/shopping-list', '/app/stock/product/ing-01',
-  '/app/invoices', '/app/invoices/sale-1',
-  '/app/notifications', '/app/profile', '/app/help', '/app/menu', '/app/chat',
-  '/app/data/import', '/app/data/export', '/app/data/magic-upload',
-  '/app/settings', '/app/settings/business', '/app/settings/hours', '/app/settings/menu',
-  '/app/settings/payments', '/app/settings/tables', '/app/settings/tax',
-  '/app/reports',
+  '/app', '/app/pos', '/app/pos/mesa/mesa-1', '/app/pos/mesa/mesa-3/dividir',
+  '/app/recetas', '/app/recetas/rec-ceviche-clasico', '/app/recetas/nueva',
+  '/app/inventario', '/app/inventario/movimiento', '/app/inventario/movimientos', '/app/inventario/lista-compras', '/app/inventario/producto/ing-01',
+  '/app/comprobantes', '/app/comprobantes/sale-1',
+  '/app/notificaciones', '/app/perfil', '/app/ayuda', '/app/menu', '/app/chat',
+  '/app/datos/importar', '/app/datos/exportar', '/app/datos/factura-ia',
+  '/app/ajustes', '/app/ajustes/negocio', '/app/ajustes/horarios', '/app/ajustes/carta',
+  '/app/ajustes/pagos', '/app/ajustes/mesas', '/app/ajustes/impuestos',
+  '/app/reportes',
 ]
 
 const results = []
@@ -60,7 +60,7 @@ page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().
 page.on('pageerror', e => consoleErrors.push('PAGEERROR ' + String(e).slice(0, 200)))
 
 async function login() {
-  await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}/ingresar`, { waitUntil: 'networkidle' })
   await page.fill('input[type="email"]', DEMO_EMAIL)
   await page.fill('input[type="password"]', DEMO_PASSWORD)
   await page.click('button[type="submit"]')
@@ -96,10 +96,10 @@ async function backFlow(name, steps, expected) {
   catch (e) { record(name, false, String(e).slice(0, 80)) }
 }
 await backFlow('Mesas → Configurar mesas → atrás', [() => go('/app/pos'), () => clickSel('[aria-label="Configurar mesas"]')], '/app/pos')
-await backFlow('Perfil → Ajustes → atrás', [() => go('/app/profile'), () => clickSel('a[href="/app/settings"]')], '/app/profile')
-await backFlow('Menú → Ajustes → atrás (sin regresión)', [() => go('/app/menu'), () => clickSel('a[href="/app/settings"]')], '/app/menu')
-await backFlow('Dashboard → receta → atrás', [() => go('/app'), () => clickSel('a[href="/app/recipes/rec-ceviche-clasico"]')], '/app')
-await backFlow('Ajustes → Mesas y zonas → atrás (sin regresión)', [() => go('/app/settings'), () => clickSel('a[href="/app/settings/tables"]')], '/app/settings')
+await backFlow('Perfil → Ajustes → atrás', [() => go('/app/perfil'), () => clickSel('a[href="/app/ajustes"]')], '/app/perfil')
+await backFlow('Menú → Ajustes → atrás (sin regresión)', [() => go('/app/menu'), () => clickSel('a[href="/app/ajustes"]')], '/app/menu')
+await backFlow('Dashboard → receta → atrás', [() => go('/app'), () => clickSel('a[href="/app/recetas/rec-ceviche-clasico"]')], '/app')
+await backFlow('Ajustes → Mesas y zonas → atrás (sin regresión)', [() => go('/app/ajustes'), () => clickSel('a[href="/app/ajustes/mesas"]')], '/app/ajustes')
 
 // 3) Cableado al mock: persistencia real
 console.log('\n— 3. Cableado al mock (persistencia)')
@@ -118,7 +118,7 @@ record('PATCH insumo persiste (use-ingredients)', api.patchPersisted)
 record('POST a lista de compras persiste (use-inventory)', api.addOk && api.present)
 
 // Botón real "Agregar a compras": tras el click, el insumo debe quedar en la lista.
-await go('/app/stock/product/ing-09')
+await go('/app/inventario/producto/ing-09')
 await clickSel('[aria-label="Agregar a compras"]')
 const inList = await page.evaluate(() => fetch('/api/inventory/shopping-list').then(r => r.json()).then(d => d.data.some(s => s.ingredientId === 'ing-09')))
 record('Botón "Agregar a compras" persiste (UI)', inList)

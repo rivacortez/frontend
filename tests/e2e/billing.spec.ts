@@ -164,12 +164,12 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
     await expect(owner.page.locator('.table-card.ocupada')).toHaveCount(0)
 
     // El comprobante (boleta) quedó emitido: aparece en la lista y su ticket trae total + IGV.
-    await gotoHydrated(owner, '/app/invoices')
+    await gotoHydrated(owner, '/app/comprobantes')
     const row = owner.page.getByRole('link', { name: /B\d+-\d+/ }).first()
     await expect(row).toBeVisible()
     await expect(row).toContainText('200.00')
     await row.click()
-    await owner.page.waitForURL(/\/app\/invoices\/[^/]+$/)
+    await owner.page.waitForURL(/\/app\/comprobantes\/[^/]+$/)
     await owner.page.waitForLoadState('networkidle')
     const ticket = owner.page.locator('.ticket')
     await expect(ticket.locator('.ticket-totals')).toContainText('IGV (18 %)')
@@ -178,11 +178,11 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
   })
 
   // ===== HU-04-05 · Comprobantes: lista + detalle (ticket local) =====
-  test('el comprobante aparece en /app/invoices (lista) y abre su detalle con IGV', async ({ owner, request }) => {
+  test('el comprobante aparece en /app/comprobantes (lista) y abre su detalle con IGV', async ({ owner, request }) => {
     const { serie, number, total } = await seedIssuedSale(request, owner, 120)
     const id = `${serie}-${number}`
 
-    await gotoHydrated(owner, '/app/invoices')
+    await gotoHydrated(owner, '/app/comprobantes')
 
     // Aparece en la lista con su número y total.
     const row = owner.page.getByRole('link', { name: new RegExp(`${serie}-${number}`) })
@@ -194,7 +194,7 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
 
     // Abrir el detalle (ticket).
     await row.click()
-    await owner.page.waitForURL(/\/app\/invoices\/[^/]+$/)
+    await owner.page.waitForURL(/\/app\/comprobantes\/[^/]+$/)
     await owner.page.waitForLoadState('networkidle')
 
     const ticket = owner.page.locator('.ticket')
@@ -210,7 +210,7 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
   // ===== HU-04-03 · Dividir cuenta por persona (suma de partes = total) =====
   test('dividir por persona: las partes suman el total de la orden', async ({ owner, request }) => {
     const { tableId, total } = await seedOrderToCharge(request, owner, { price1: 100, qty1: 2 }) // total 200
-    await gotoHydrated(owner, `/app/pos/mesa/${tableId}/split`)
+    await gotoHydrated(owner, `/app/pos/mesa/${tableId}/dividir`)
 
     // Modo "Por persona" (default). El subtítulo del header trae el total IGV incl.
     await expect(owner.page.getByRole('tab', { name: /por persona/i })).toHaveAttribute('aria-selected', 'true')
@@ -231,7 +231,7 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
   test('dividir por ítems: asignar cada plato a una cuenta y verificar que suman el total', async ({ owner, request }) => {
     // Dos platos distintos (60 + 40 = 100) → dos líneas asignables a cuentas A/B.
     const { tableId, total } = await seedOrderToCharge(request, owner, { price1: 60, price2: 40, secondItem: true })
-    await gotoHydrated(owner, `/app/pos/mesa/${tableId}/split`)
+    await gotoHydrated(owner, `/app/pos/mesa/${tableId}/dividir`)
 
     // Cambiar a modo "Por ítems".
     await owner.page.getByRole('tab', { name: /por items/i }).click()
@@ -258,7 +258,7 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
   test('anular un comprobante emitido (owner) con motivo lo deja en estado anulada', async ({ owner, request }) => {
     const { saleId, serie, number } = await seedIssuedSale(request, owner, 150)
 
-    await gotoHydrated(owner, `/app/invoices/${saleId}`)
+    await gotoHydrated(owner, `/app/comprobantes/${saleId}`)
     await expect(owner.page.locator('.ticket')).toBeVisible()
 
     // El owner ve el botón de anular (staff no lo vería).
@@ -285,7 +285,7 @@ test.describe('E04 · Cobros y comprobantes (owner, UI)', () => {
     await expect(owner.page.getByRole('button', { name: /anular comprobante/i })).toHaveCount(0)
 
     // En la lista, el comprobante aparece con el tag "Anulada".
-    await gotoHydrated(owner, '/app/invoices')
+    await gotoHydrated(owner, '/app/comprobantes')
     const row = owner.page.getByRole('link', { name: new RegExp(`${serie}-${number}`) })
     await expect(row).toBeVisible()
     await expect(row.locator('.void-tag')).toHaveText(/anulada/i)

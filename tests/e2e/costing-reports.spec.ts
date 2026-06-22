@@ -170,7 +170,7 @@ test.describe('E07 · Reportes y dashboards', () => {
   test('el dashboard del admin (owner) renderiza los KPIs ejecutivos', async ({ owner, request }) => {
     await seedManagementScenario(request, owner, { cif: 300, units: 2 })
 
-    await gotoApp(owner, '/app/reports')
+    await gotoApp(owner, '/app/reportes')
     const page = owner.page
 
     await expect(page.getByRole('heading', { name: /reportes/i })).toBeVisible()
@@ -192,7 +192,7 @@ test.describe('E07 · Reportes y dashboards', () => {
   test('las pestañas de reportes cargan (ventas, Pareto, inventario, food-cost, mermas)', async ({ owner, request }) => {
     await seedManagementScenario(request, owner, { cif: 300, units: 3 })
 
-    await gotoApp(owner, '/app/reports')
+    await gotoApp(owner, '/app/reportes')
     const page = owner.page
 
     // Las pestañas de gestión están disponibles para el owner.
@@ -229,7 +229,7 @@ test.describe('E07 · Reportes y dashboards', () => {
   test('exportar CSV de ventas dispara una descarga', async ({ owner, request }) => {
     await seedManagementScenario(request, owner, { cif: 300, units: 2 })
 
-    await gotoApp(owner, '/app/reports')
+    await gotoApp(owner, '/app/reportes')
     const page = owner.page
 
     // Ir a la pestaña Ventas (tiene botón de export CSV).
@@ -249,7 +249,7 @@ test.describe('E07 · Reportes y dashboards', () => {
   test('exportar CSV de inventario dispara una descarga', async ({ owner, request }) => {
     await seedManagementScenario(request, owner, { cif: 300, units: 2 })
 
-    await gotoApp(owner, '/app/reports')
+    await gotoApp(owner, '/app/reportes')
     const page = owner.page
 
     await page.getByRole('tab', { name: 'Inventario' }).click()

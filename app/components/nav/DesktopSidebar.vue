@@ -10,7 +10,7 @@ function isActive(item: AppNavItem): boolean {
 async function logout(): Promise<void> {
   await $fetch('/api/auth/logout', { method: 'POST' })
   await clear()
-  await navigateTo('/login')
+  await navigateTo('/ingresar')
 }
 
 const initials = computed(() =>

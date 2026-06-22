@@ -23,7 +23,7 @@ async function gotoHydrated(page: import('@playwright/test').Page, path: string)
 test.describe('Ajustes · catálogos (owner por la UI)', () => {
   test('Unidades: crear, editar y eliminar una unidad de medida', async ({ owner }) => {
     const { page } = owner
-    await gotoHydrated(page, '/app/settings/units')
+    await gotoHydrated(page, '/app/ajustes/unidades')
     await expect(page.getByRole('heading', { name: 'Unidades de medida' })).toBeVisible()
 
     // ---- Crear ----
@@ -62,7 +62,7 @@ test.describe('Ajustes · catálogos (owner por la UI)', () => {
 
   test('Proveedores: crear un proveedor con RUC de 11 dígitos', async ({ owner }) => {
     const { page } = owner
-    await gotoHydrated(page, '/app/settings/suppliers')
+    await gotoHydrated(page, '/app/ajustes/proveedores')
     await expect(page.getByRole('heading', { name: 'Proveedores' })).toBeVisible()
 
     const ruc = '20123456789' // 11 dígitos
@@ -82,7 +82,7 @@ test.describe('Ajustes · catálogos (owner por la UI)', () => {
 
   test('Categorías de insumo: crear una categoría', async ({ owner }) => {
     const { page } = owner
-    await gotoHydrated(page, '/app/settings/catalog-categories')
+    await gotoHydrated(page, '/app/ajustes/categorias')
     await expect(page.getByRole('heading', { name: 'Categorías de insumo' })).toBeVisible()
 
     const name = `Categoría E2E ${Date.now() % 100000}`
@@ -102,7 +102,7 @@ test.describe('Ajustes · catálogos (owner por la UI)', () => {
 test.describe('Ajustes · fiscal (persiste tras recargar)', () => {
   test('Impuestos: editar IGV y guardar → persiste al recargar', async ({ owner }) => {
     const { page } = owner
-    await gotoHydrated(page, '/app/settings/tax')
+    await gotoHydrated(page, '/app/ajustes/impuestos')
     await expect(page.getByRole('heading', { name: 'Impuestos' })).toBeVisible()
 
     // El owner SÍ puede editar (readonly solo para no-owner): el input no debe estar deshabilitado.
@@ -118,13 +118,13 @@ test.describe('Ajustes · fiscal (persiste tras recargar)', () => {
     expect(saved.ok()).toBeTruthy()
 
     // Recargar → el valor persistido vuelve del backend.
-    await gotoHydrated(page, '/app/settings/tax')
+    await gotoHydrated(page, '/app/ajustes/impuestos')
     await expect(page.locator('input.tax-input')).toHaveValue('12')
   })
 
   test('Negocio: editar razón social y guardar → persiste al recargar', async ({ owner }) => {
     const { page } = owner
-    await gotoHydrated(page, '/app/settings/business')
+    await gotoHydrated(page, '/app/ajustes/negocio')
     await expect(page.getByRole('heading', { name: 'Negocio' })).toBeVisible()
 
     const legalName = `Inversiones E2E ${Date.now() % 100000} S.A.C.`
@@ -137,7 +137,7 @@ test.describe('Ajustes · fiscal (persiste tras recargar)', () => {
     ])
     expect(saved.ok()).toBeTruthy()
 
-    await gotoHydrated(page, '/app/settings/business')
+    await gotoHydrated(page, '/app/ajustes/negocio')
     await expect(page.getByLabel('Razón social')).toHaveValue(legalName)
   })
 })
@@ -165,8 +165,8 @@ test.describe('Notificaciones · stock bajo', () => {
     await expect(bell).toBeVisible()
     await expect(bell.locator('.badge')).toHaveText('1')
 
-    // 3) En /app/notifications aparece la notificación de "stock bajo" (sin leer).
-    await gotoHydrated(page, '/app/notifications')
+    // 3) En /app/notificaciones aparece la notificación de "stock bajo" (sin leer).
+    await gotoHydrated(page, '/app/notificaciones')
     await expect(page.getByRole('heading', { name: 'Notificaciones' })).toBeVisible()
     const newSection = page.locator('.ntf-section', { hasText: 'Nuevas' })
     await expect(newSection).toBeVisible()

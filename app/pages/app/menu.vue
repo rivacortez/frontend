@@ -26,27 +26,27 @@ const allGroups: MenuGroup[] = [
     title: 'Operación',
     entries: [
       { icon: 'i-lucide-chef-hat', label: 'Cocina (KDS)', sub: 'Cola de pedidos en preparación', to: '/app/cocina' },
-      { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Catálogo, costos y márgenes', to: '/app/recipes' },
-      { icon: 'i-lucide-package', label: 'Inventario', sub: 'Stock, movimientos y conteos', to: '/app/stock' },
+      { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Catálogo, costos y márgenes', to: '/app/recetas' },
+      { icon: 'i-lucide-package', label: 'Inventario', sub: 'Stock, movimientos y conteos', to: '/app/inventario' },
       { icon: 'i-lucide-percent', label: 'Costeo y márgenes', sub: 'Costo, margen y precio por plato', to: '/app/costeo', ownerOnly: true },
-      { icon: 'i-lucide-receipt', label: 'Comprobantes', sub: 'Ventas y tickets emitidos', to: '/app/invoices' },
+      { icon: 'i-lucide-receipt', label: 'Comprobantes', sub: 'Ventas y tickets emitidos', to: '/app/comprobantes' },
       { icon: 'i-lucide-lock', label: 'Cierre de caja (Z)', sub: 'Totales del turno y cierre Z', to: '/app/cierre', ownerOnly: true },
-      { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'Dashboards, ventas y análisis', to: '/app/reports' },
+      { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'Dashboards, ventas y análisis', to: '/app/reportes' },
     ],
   },
   {
     title: 'Datos',
     entries: [
-      { icon: 'i-lucide-upload', label: 'Importar datos', sub: 'CSV desde TumiSoft y otros', to: '/app/data/import' },
-      { icon: 'i-lucide-download', label: 'Exportar datos', sub: 'Descarga tus registros', to: '/app/data/export' },
+      { icon: 'i-lucide-upload', label: 'Importar datos', sub: 'CSV desde TumiSoft y otros', to: '/app/datos/importar' },
+      { icon: 'i-lucide-download', label: 'Exportar datos', sub: 'Descarga tus registros', to: '/app/datos/exportar' },
     ],
   },
   {
     title: 'Cuenta',
     entries: [
-      { icon: 'i-lucide-user', label: 'Perfil', sub: 'Tus datos y preferencias', to: '/app/profile' },
-      { icon: 'i-lucide-settings', label: 'Ajustes del negocio', sub: 'Horarios, mesas, impuestos, pagos', to: '/app/settings' },
-      { icon: 'i-lucide-circle-help', label: 'Ayuda', sub: 'Centro de soporte', to: '/app/help' },
+      { icon: 'i-lucide-user', label: 'Perfil', sub: 'Tus datos y preferencias', to: '/app/perfil' },
+      { icon: 'i-lucide-settings', label: 'Ajustes del negocio', sub: 'Horarios, mesas, impuestos, pagos', to: '/app/ajustes' },
+      { icon: 'i-lucide-circle-help', label: 'Ayuda', sub: 'Centro de soporte', to: '/app/ayuda' },
     ],
   },
 ]
@@ -61,7 +61,7 @@ const groups = computed<MenuGroup[]>(() =>
 async function logout(): Promise<void> {
   await $fetch('/api/auth/logout', { method: 'POST' })
   await clear()
-  await navigateTo('/login')
+  await navigateTo('/ingresar')
 }
 
 const initials = computed(() =>

@@ -14,7 +14,7 @@ useSeoMeta({
         <img src="/img/gastronomia-logo.svg" alt="GastronomIA" class="brand-logo">
       </div>
       <UButton
-        :to="loggedIn ? '/app' : '/login'"
+        :to="loggedIn ? '/app' : '/ingresar'"
         color="neutral"
         variant="outline"
         size="sm"
@@ -33,7 +33,7 @@ useSeoMeta({
         a tus ventas en español. Hecho para PyMEs gastronómicas del Perú.
       </p>
       <div class="hero-cta">
-        <UButton :to="loggedIn ? '/app' : '/login'" size="xl" trailing-icon="i-lucide-arrow-right">
+        <UButton :to="loggedIn ? '/app' : '/ingresar'" size="xl" trailing-icon="i-lucide-arrow-right">
           {{ loggedIn ? 'Ir al panel' : 'Empezar' }}
         </UButton>
       </div>

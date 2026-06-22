@@ -70,13 +70,13 @@ export function seedUser(
 }
 
 /**
- * Login por la UI real (/login) → deja la página autenticada en /app.
+ * Login por la UI real (/ingresar) → deja la página autenticada en /app.
  * Espera la hidratación de Nuxt (networkidle) ANTES de enviar; si no, el form hace
- * submit nativo (recarga /login) en vez de llamar al BFF. El click se liga a la
+ * submit nativo (recarga /ingresar) en vez de llamar al BFF. El click se liga a la
  * navegación con Promise.all para evitar carreras.
  */
 export async function loginUI(page: Page, email: string, password: string): Promise<void> {
-  await page.goto('/login')
+  await page.goto('/ingresar')
   await page.waitForLoadState('networkidle')
   const submit = page.getByRole('button', { name: /iniciar sesión/i })
   await submit.waitFor({ state: 'visible' })

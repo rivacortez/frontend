@@ -234,7 +234,7 @@ const summary = computed(() => {
     <UiScreenHeader
       title="Asistente de migración"
       subtitle="Configura tu restaurante e importa tus datos"
-      back="/app/settings"
+      back="/app/ajustes"
     />
 
     <!-- Gate de rol: el staff no puede correr la migración (config fiscal + imports). -->
@@ -461,7 +461,7 @@ const summary = computed(() => {
           <span><b>Primer paso sugerido:</b> crea tu plato estrella en Recetas y descubre su margen real.</span>
         </div>
         <div class="mig-cta mig-cta-row">
-          <UButton size="xl" color="neutral" variant="ghost" to="/app/recipes/new">Crear receta</UButton>
+          <UButton size="xl" color="neutral" variant="ghost" to="/app/recetas/nueva">Crear receta</UButton>
           <UButton size="xl" block trailing-icon="i-lucide-arrow-right" to="/app">
             Ir a mi panel
           </UButton>

@@ -155,7 +155,7 @@ test.describe('POS · salón + abrir mesa + tomar orden', () => {
     const zoneName = `Terraza ${tag}`
     const tableCode = String(20 + (Number(tag) % 70))
 
-    await gotoReady(owner.page, '/app/settings/tables')
+    await gotoReady(owner.page, '/app/ajustes/mesas')
 
     // Crear zona: botón "Nueva zona" del empty-state o el "+" de la cabecera.
     const newZoneBtn = owner.page.getByRole('button', { name: /nueva zona/i })

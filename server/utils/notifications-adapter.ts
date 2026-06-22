@@ -91,8 +91,8 @@ function toAction(type: string, data: unknown): { actionLabel?: string, actionTo
     case 'low_stock': {
       const ingredientId = pickId(data, ['ingredientId', 'productId'])
       return ingredientId
-        ? { actionLabel: 'Ver insumo', actionTo: `/app/stock/product/${ingredientId}` }
-        : { actionLabel: 'Lista de compra', actionTo: '/app/stock/shopping-list' }
+        ? { actionLabel: 'Ver insumo', actionTo: `/app/inventario/producto/${ingredientId}` }
+        : { actionLabel: 'Lista de compra', actionTo: '/app/inventario/lista-compras' }
     }
     case 'order_ready': {
       return { actionLabel: 'Ver cocina', actionTo: '/app/cocina' }

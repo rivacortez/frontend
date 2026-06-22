@@ -11,7 +11,7 @@ import { test, expect, apiSeeder, type OwnerCtx } from './_fixtures'
  * Flujos cubiertos:
  *   1. Insumos · alta por CSV ("Importar") + reporte (creados/errores) + listado.
  *   2. Insumos · edición de un insumo desde su detalle.
- *   3. Recetas · wizard BOM de 3 pasos → aparece en /app/recipes con costo/margen → detalle.
+ *   3. Recetas · wizard BOM de 3 pasos → aparece en /app/recetas con costo/margen → detalle.
  *   4. Menú/plato · el plato muestra precio de venta + margen (sano y <25% en riesgo).
  *   5. Modificadores + disponibilidad · se agregan desde el detalle y se ven listados.
  */
@@ -31,7 +31,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
   // ---------------------------------------------------------------------------
   test('Insumos · importar CSV muestra el reporte (creados/errores) y se listan', async ({ owner }) => {
     const { page } = owner
-    await gotoHydrated(page, '/app/stock')
+    await gotoHydrated(page, '/app/inventario')
 
     // Nombre único por corrida → verificable en el listado tras importar.
     const tomate = `Tomate CSV ${uniq('t')}`
@@ -75,7 +75,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     await seed.ingredient(`SEED-CEB-${Date.now()}`, original, 4)
 
     // Entrar al detalle desde el listado de Stock (las filas son enlaces).
-    await gotoHydrated(page, '/app/stock')
+    await gotoHydrated(page, '/app/inventario')
     await page.getByRole('link', { name: new RegExp(original, 'i') }).click()
     await expect(page).toHaveURL(/\/app\/stock\/product\//)
     await page.waitForLoadState('networkidle')
@@ -105,7 +105,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
   })
 
   // ---------------------------------------------------------------------------
-  // 3 · Recetas: wizard BOM 3 pasos → aparece en /app/recipes → abrir detalle
+  // 3 · Recetas: wizard BOM 3 pasos → aparece en /app/recetas → abrir detalle
   // ---------------------------------------------------------------------------
   test('Recetas · wizard BOM crea el plato y aparece con costo/margen', async ({ owner, request }) => {
     const { page, token } = owner
@@ -115,7 +115,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     await seed.ingredient(`SEED-FISH-${Date.now()}`, insumo, 40)
 
     const plato = `Ceviche ${uniq('r')}`
-    await gotoHydrated(page, '/app/recipes/new')
+    await gotoHydrated(page, '/app/recetas/nueva')
 
     // ---- Paso 1 · Datos básicos ----
     await page.locator('#recipe-name').fill(plato)
@@ -156,7 +156,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     await expect(page.getByRole('heading', { name: plato, level: 1 })).toBeVisible()
 
     // Aparece en el listado de recetas con su margen.
-    await gotoHydrated(page, '/app/recipes')
+    await gotoHydrated(page, '/app/recetas')
     const card = page.getByRole('listitem').filter({ hasText: plato })
     await expect(card).toBeVisible()
     await expect(card.getByText('84%')).toBeVisible()
@@ -177,7 +177,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     await seed.ingredient(`SEED-LOMO-${Date.now()}`, insumo, 40)
 
     const plato = `Lomo Saltado ${uniq('r')}`
-    await gotoHydrated(page, '/app/recipes/new')
+    await gotoHydrated(page, '/app/recetas/nueva')
 
     // Paso 1 · precio BAJO (9.50) → con costo 8 el margen es 16% (<20% crítico en el
     // wizard; <25% "en riesgo" en el detalle, HU-02-10).
@@ -228,7 +228,7 @@ test.describe('Catálogo E02 (dueño, UI)', () => {
     const recipe = await seed.recipe(`Pollo a la Brasa ${uniq('r')}`, ing.id, 0.5)
     await seed.menuItem(recipe.id, 'Pollo a la Brasa', 60)
 
-    await gotoHydrated(page, `/app/recipes/${recipe.id}`)
+    await gotoHydrated(page, `/app/recetas/${recipe.id}`)
     await expect(page.getByRole('heading', { name: /pollo a la brasa/i, level: 1 })).toBeVisible()
 
     // ---- Modificador (HU-02-11): nombre + Δ precio ----
