@@ -10,7 +10,10 @@ const TOTAL = 5
 </script>
 
 <template>
-  <div class="ob-screen">
+  <div class="ob-layout">
+    <AuthBanner class="ob-banner" compact />
+
+    <div class="ob-screen">
     <header class="ob-hdr">
       <UButton
         v-if="props.back"
@@ -47,10 +50,20 @@ const TOTAL = 5
     <footer v-if="$slots.cta" class="ob-cta">
       <slot name="cta" />
     </footer>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.ob-layout {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1fr;
+  background: var(--crema);
+}
+@media (min-width: 900px) {
+  .ob-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
+}
 .ob-screen {
   min-height: 100dvh;
   display: flex; flex-direction: column;

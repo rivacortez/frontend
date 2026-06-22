@@ -4,6 +4,8 @@ import type { Recipe } from '#shared/types/domain'
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Recetas — GastronomIA' })
 
+definePageHeader(() => ({ title: 'Recetas' }))
+
 const router = useRouter()
 
 type FilterId = 'all' | 'low' | 'cat'
@@ -132,21 +134,13 @@ function pickSort(id: SortId): void {
 
 <template>
   <div class="rcp-page">
-    <!-- ============ Header ============ -->
-    <header class="rcp-hdr">
-      <button class="icon-btn" aria-label="Volver" @click="router.back()">
-        <UIcon name="i-lucide-arrow-left" />
-      </button>
-      <h1 class="rcp-title">
-        Recetas
-        <span class="rcp-role" aria-label="Solo dueño">
-          <UIcon name="i-lucide-lock" /> Dueño
-        </span>
-      </h1>
-      <NuxtLink to="/app/recetas/nueva" class="rcp-new" aria-label="Crear nueva receta">
-        <UIcon name="i-lucide-plus" /> Nueva
-      </NuxtLink>
-    </header>
+    <ClientOnly>
+      <Teleport to="#topbar-actions">
+        <NuxtLink to="/app/recetas/nueva" class="rcp-new" aria-label="Crear nueva receta">
+          <UIcon name="i-lucide-plus" /> Nueva
+        </NuxtLink>
+      </Teleport>
+    </ClientOnly>
 
     <!-- ============ Resumen ============ -->
     <div class="rcp-summary" aria-label="Resumen">
@@ -325,34 +319,7 @@ function pickSort(id: SortId): void {
 }
 
 /* ============ HEADER ============ */
-.rcp-hdr {
-  padding: 8px 16px 14px;
-  display: grid;
-  grid-template-columns: 40px 1fr auto;
-  align-items: center;
-  gap: 8px;
-}
 /* .rcp-back → .icon-btn global (components.css) */
-.rcp-title {
-  font-family: var(--font-sans);
-  font-size: 20px; font-weight: 600; letter-spacing: -0.01em;
-  color: var(--fg1);
-  text-align: center;
-  margin: 0;
-  line-height: 1;
-}
-.rcp-role {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 10px; font-weight: 700;
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--terracotta-700);
-  background: var(--terracotta-100);
-  padding: 2px 7px;
-  border-radius: 999px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-.rcp-role .iconify { width: 9px; height: 9px; }
 .rcp-new {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--terracotta);

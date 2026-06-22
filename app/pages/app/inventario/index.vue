@@ -4,6 +4,11 @@ import type { Ingredient } from '#shared/types/domain'
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Stock — GastronomIA' })
 
+definePageHeader(() => ({
+  title: 'Stock',
+  subtitle: 'Tu inventario en tiempo real',
+}))
+
 const { data: ingredients } = useIngredients()
 const { data: shopping } = useShoppingList()
 const toast = useToast()
@@ -144,24 +149,16 @@ async function onImportFile(e: Event): Promise<void> {
 
 <template>
   <div class="stk-screen">
-    <!-- Header -->
-    <header class="stk-hdr">
-      <div>
-        <h1 class="stk-hdr-title">Stock</h1>
-        <div class="stk-hdr-sub">
-          <span class="pulse" aria-hidden="true" />
-          Tu inventario en tiempo real
-        </div>
-      </div>
-      <div class="stk-hdr-actions">
+    <ClientOnly>
+      <Teleport to="#topbar-actions">
         <button type="button" class="stk-icon-btn" aria-label="Importar insumos (CSV)" @click="showImport = true">
           <UIcon name="i-lucide-upload" />
         </button>
         <NuxtLink to="/app/inventario/movimientos" class="stk-icon-btn" aria-label="Historial de movimientos">
           <UIcon name="i-lucide-history" />
         </NuxtLink>
-      </div>
-    </header>
+      </Teleport>
+    </ClientOnly>
 
     <!-- Search + scan -->
     <div class="stk-search-wrap">
@@ -414,29 +411,6 @@ async function onImportFile(e: Event): Promise<void> {
   .stk-screen { padding-top: 28px; }
 }
 
-.stk-hdr {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  padding: 4px 0 14px;
-}
-.stk-hdr-title {
-  font-size: 28px; font-weight: 600;
-  letter-spacing: -0.02em; line-height: 1; margin: 0;
-  color: var(--fg1);
-}
-.stk-hdr-sub {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12.5px; color: var(--fg2);
-  margin-top: 6px;
-}
-.stk-hdr-sub .pulse {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--oliva);
-  animation: stkPulse 1.8s var(--ease-standard) infinite;
-}
-@keyframes stkPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(110, 123, 97, 0.45); }
-  50% { box-shadow: 0 0 0 5px rgba(110, 123, 97, 0); }
-}
 .stk-icon-btn {
   width: 40px; height: 40px; border-radius: 12px;
   background: var(--pure-white);

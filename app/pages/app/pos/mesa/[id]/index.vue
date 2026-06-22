@@ -19,6 +19,12 @@ const isOwner = computed(() => user.value?.role === 'owner')
 
 useSeoMeta({ title: () => `Mesa ${table.value ? String(table.value.number).padStart(2, '0') : ''} — GastronomIA` })
 
+definePageHeader(() => ({
+  title: table.value ? `Mesa ${pad(table.value.number)}` : 'Mesa',
+  subtitle: table.value ? `${table.value.zone} · ${table.value.guests ?? '—'} personas` : undefined,
+  back: '/app/pos',
+}))
+
 // ===== Carrito local: "Por enviar" =====
 interface CartLine {
   recipeId: string
@@ -170,19 +176,13 @@ function onPaid(serie: string, number: number): void {
 <template>
   <div class="md-screen">
     <template v-if="table">
-      <!-- Header -->
-      <header class="md-hdr">
-        <button class="icon-btn" aria-label="Volver a mesas" @click="handleBack">
-          <UIcon name="i-lucide-arrow-left" />
-        </button>
-        <div class="md-title-wrap">
-          <h1 class="md-title">Mesa {{ pad(table.number) }}</h1>
-          <div class="md-sub">{{ table.zone }} · {{ table.guests ?? '—' }} personas</div>
-        </div>
-        <div v-if="table.openedAt" class="md-time-badge" aria-label="Tiempo abierta">
-          <UIcon name="i-lucide-clock" /> {{ elapsed(table.openedAt) }}
-        </div>
-      </header>
+      <ClientOnly>
+        <Teleport to="#topbar-actions">
+          <div v-if="table.openedAt" class="md-time-badge" aria-label="Tiempo abierta">
+            <UIcon name="i-lucide-clock" /> {{ elapsed(table.openedAt) }}
+          </div>
+        </Teleport>
+      </ClientOnly>
 
       <!-- Resumen sticky -->
       <section class="md-resumen">
@@ -382,20 +382,6 @@ function onPaid(serie: string, number: number): void {
   .md-screen { padding-top: 24px; }
 }
 
-.md-hdr {
-  padding: 4px 16px 14px;
-  display: grid; grid-template-columns: 40px 1fr auto; align-items: center;
-  gap: 12px;
-}
-/* .md-back → .icon-btn global (components.css) */
-.md-title-wrap { text-align: center; min-width: 0; }
-.md-title {
-  font-size: 20px; font-weight: 600;
-  letter-spacing: -0.02em; line-height: 1.1;
-  color: var(--fg1);
-  margin: 0;
-}
-.md-sub { font-size: 12px; color: var(--fg3); margin-top: 2px; }
 .md-time-badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-family: var(--font-mono);

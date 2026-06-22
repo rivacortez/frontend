@@ -4,6 +4,11 @@ import type { Ingredient } from '#shared/types/domain'
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Nueva receta — GastronomIA' })
 
+definePageHeader(() => ({
+  title: 'Nueva receta',
+  back: '/app/recetas',
+}))
+
 const toast = useToast()
 
 /* ===== Wizard ===== */

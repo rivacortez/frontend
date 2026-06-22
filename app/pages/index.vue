@@ -3,20 +3,37 @@ const { loggedIn } = useUserSession()
 
 useSeoMeta({
   title: 'GastronomIA — Tu restaurante, rentable',
-  description: 'Forecasting de demanda, costeo por plato y chat analítico con IA para restaurantes PyME.',
+  description:
+    'Pronóstico de demanda, costeo por plato y chat analítico para restaurantes PyME del Perú.',
 })
+
+const pillars = [
+  {
+    icon: 'i-lucide-trending-up',
+    title: 'Pronóstico de demanda',
+    desc: 'Predicciones diarias por plato con banda q10–q90 para comprar justo lo necesario.',
+  },
+  {
+    icon: 'i-lucide-calculator',
+    title: 'Costeo por plato',
+    desc: 'Recetas, mermas y márgenes recalculados con cada compra. Sabés cuánto deja cada plato.',
+  },
+  {
+    icon: 'i-lucide-message-square-text',
+    title: 'Chat analítico',
+    desc: 'Preguntá en español —«¿qué plato dejó más margen?»— y obtené la respuesta al instante.',
+  },
+]
 </script>
 
 <template>
   <div class="landing">
     <header class="landing-hdr">
-      <div class="brand">
-        <img src="/img/gastronomia-logo.svg" alt="GastronomIA" class="brand-logo">
-      </div>
+      <img src="/img/gastronomia-logo.svg" alt="GastronomIA" class="brand-logo">
       <UButton
         :to="loggedIn ? '/app' : '/ingresar'"
         color="neutral"
-        variant="outline"
+        variant="ghost"
         size="sm"
       >
         {{ loggedIn ? 'Ir al panel' : 'Iniciar sesión' }}
@@ -24,102 +41,134 @@ useSeoMeta({
     </header>
 
     <main class="hero">
-      <p class="eyebrow">Rentabilidad con IA para restaurantes</p>
-      <h1 class="display hero-title">
-        Tu restaurante,<br>rentable.
-      </h1>
+      <p class="eyebrow">Rentabilidad con IA · Restaurantes PyME</p>
+      <h1 class="display hero-title">Tu restaurante, rentable.</h1>
       <p class="hero-sub">
-        Pronostica tu demanda, costea cada plato al céntimo y pregúntale
-        a tus ventas en español. Hecho para PyMEs gastronómicas del Perú.
+        Pronosticá la demanda, costeá cada plato al céntimo y preguntale a tus
+        ventas en español.
       </p>
       <div class="hero-cta">
-        <UButton :to="loggedIn ? '/app' : '/ingresar'" size="xl" trailing-icon="i-lucide-arrow-right">
+        <UButton
+          :to="loggedIn ? '/app' : '/ingresar'"
+          size="lg"
+          trailing-icon="i-lucide-arrow-right"
+        >
           {{ loggedIn ? 'Ir al panel' : 'Empezar' }}
         </UButton>
       </div>
 
-      <ul class="hero-pillars" aria-label="Pilares del producto">
-        <li>
-          <UIcon name="i-lucide-trending-up" class="pillar-ico" />
-          <b>Forecast de demanda</b>
-          <span>Predicciones con bandas de confianza para comprar justo lo necesario.</span>
-        </li>
-        <li>
-          <UIcon name="i-lucide-calculator" class="pillar-ico" />
-          <b>Costeo por plato</b>
-          <span>Recetas, mermas y márgenes recalculados con cada compra.</span>
-        </li>
-        <li>
-          <UIcon name="i-lucide-bot" class="pillar-ico" />
-          <b>Chat analítico</b>
-          <span>"¿Qué plato me dejó más margen esta semana?" — respondido al instante.</span>
+      <ul class="pillars" aria-label="Qué hace GastronomIA">
+        <li v-for="p in pillars" :key="p.title" class="pillar">
+          <UIcon :name="p.icon" class="pillar-ico" />
+          <h2 class="pillar-title">{{ p.title }}</h2>
+          <p class="pillar-desc">{{ p.desc }}</p>
         </li>
       </ul>
     </main>
 
-    <footer class="landing-foot">
-      <span>v0.1.0 · Hecho con <span class="heart">♥</span> en Lima, Perú</span>
-    </footer>
+    <footer class="landing-foot">Lima · Perú</footer>
   </div>
 </template>
 
 <style scoped>
 .landing {
   min-height: 100dvh;
-  display: flex; flex-direction: column;
+  display: flex;
+  flex-direction: column;
   background:
-    radial-gradient(900px 600px at 85% -10%, rgba(201, 106, 67, 0.12), transparent 60%),
-    radial-gradient(700px 500px at -10% 90%, rgba(216, 164, 65, 0.10), transparent 60%),
-    var(--crema);
+    radial-gradient(800px 420px at 88% -8%, rgba(201, 106, 67, 0.07), transparent 70%),
+    var(--crema-50);
 }
+
 .landing-hdr {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px;
-  max-width: 1080px; width: 100%; margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 22px 24px;
 }
-.brand { display: flex; align-items: center; }
-.brand-logo { height: 20px; width: auto; display: block; }
+.brand-logo {
+  height: 20px;
+  width: auto;
+  display: block;
+}
 
 .hero {
   flex: 1;
-  max-width: 1080px; width: 100%; margin: 0 auto;
-  padding: 48px 24px 32px;
-  display: flex; flex-direction: column;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(40px, 9vh, 96px) 24px 40px;
+  display: flex;
+  flex-direction: column;
 }
-.hero-title { font-size: clamp(44px, 8vw, 76px); margin: 14px 0 0; }
+.hero-title {
+  font-size: clamp(46px, 8.5vw, 92px);
+  margin: 16px 0 0;
+  max-width: 12ch;
+}
 .hero-sub {
-  margin-top: 18px;
-  font-size: 17px; line-height: 1.6; color: var(--fg2);
-  max-width: 30em;
+  margin-top: 22px;
+  font-size: clamp(17px, 2.2vw, 20px);
+  line-height: 1.55;
+  color: var(--fg2);
+  max-width: 34ch;
   text-wrap: pretty;
 }
-.hero-cta { margin-top: 28px; }
+.hero-cta {
+  margin-top: 32px;
+}
 
-.hero-pillars {
-  list-style: none; padding: 0;
-  margin-top: 56px;
-  display: grid; gap: 14px;
+.pillars {
+  list-style: none;
+  padding: 0;
+  margin: clamp(56px, 12vh, 104px) 0 0;
+  display: grid;
+  gap: 16px;
   grid-template-columns: 1fr;
 }
-@media (min-width: 768px) {
-  .hero-pillars { grid-template-columns: repeat(3, 1fr); }
+@media (min-width: 760px) {
+  .pillars {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
-.hero-pillars li {
-  background: var(--pure-white);
+.pillar {
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  padding: 18px;
-  display: flex; flex-direction: column; gap: 6px;
-  box-shadow: var(--shadow-xs);
+  border-radius: 16px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.pillar-ico { width: 22px; height: 22px; color: var(--terracotta); margin-bottom: 4px; }
-.hero-pillars b { font-size: 15px; color: var(--fg1); }
-.hero-pillars span { font-size: 13.5px; line-height: 1.5; color: var(--fg2); }
+.pillar-ico {
+  width: 20px;
+  height: 20px;
+  color: var(--terracotta);
+  margin-bottom: 6px;
+}
+.pillar-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg1);
+}
+.pillar-desc {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg2);
+  text-wrap: pretty;
+}
 
 .landing-foot {
-  padding: 20px;
-  text-align: center;
-  font-size: 12px; color: var(--fg3);
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--fg3);
 }
-.heart { color: var(--terracotta); }
 </style>

@@ -7,6 +7,11 @@ import type { KitchenQueueItem } from '~/composables/use-kitchen'
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Cocina (KDS) — GastronomIA' })
 
+definePageHeader(() => ({
+  title: 'Cocina',
+  subtitle: 'KDS · pedidos en cola',
+}))
+
 const toast = useToast()
 
 // Estación seleccionada: '' = "Todas" (sin filtro). El backend filtra por uuid.
@@ -82,12 +87,8 @@ const isMutating = computed(() => startItem.isLoading.value || readyItem.isLoadi
 
 <template>
   <div class="kds-screen">
-    <header class="kds-hdr">
-      <div class="kds-title-wrap">
-        <h1>Cocina</h1>
-        <span class="kds-eyebrow">KDS · pedidos en cola</span>
-      </div>
-      <div class="kds-hdr-actions">
+    <ClientOnly>
+      <Teleport to="#topbar-actions">
         <span v-if="lateCount" class="kds-late-badge" :aria-label="`${lateCount} pedidos demorados`">
           <UIcon name="i-lucide-alarm-clock" /> {{ lateCount }} demorado{{ lateCount === 1 ? '' : 's' }}
         </span>
@@ -99,8 +100,8 @@ const isMutating = computed(() => startItem.isLoading.value || readyItem.isLoadi
         >
           <UIcon name="i-lucide-refresh-cw" />
         </button>
-      </div>
-    </header>
+      </Teleport>
+    </ClientOnly>
 
     <!-- Selector de estación -->
     <div class="kds-chips" role="tablist" aria-label="Filtrar por estación">
@@ -204,22 +205,6 @@ const isMutating = computed(() => startItem.isLoading.value || readyItem.isLoadi
 @media (min-width: 1024px) {
   .kds-screen { padding-top: 28px; }
 }
-
-.kds-hdr {
-  padding: 4px 20px 12px;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px;
-}
-.kds-title-wrap { display: flex; flex-direction: column; gap: 2px; }
-.kds-hdr h1 {
-  font-size: 28px; font-weight: 600;
-  letter-spacing: -0.02em; margin: 0; line-height: 1;
-}
-.kds-eyebrow {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--fg3);
-}
-.kds-hdr-actions { display: flex; align-items: center; gap: 8px; }
 
 .kds-late-badge {
   display: inline-flex; align-items: center; gap: 5px;

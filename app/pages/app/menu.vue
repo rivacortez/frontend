@@ -2,6 +2,8 @@
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Más — GastronomIA' })
 
+definePageHeader(() => ({ title: 'Más' }))
+
 const { user, clear } = useUserSession()
 
 interface MenuEntry {
@@ -75,10 +77,6 @@ const initials = computed(() =>
 
 <template>
   <div class="menu-page">
-    <header class="menu-hdr">
-      <h1 class="menu-title">Más</h1>
-    </header>
-
     <div class="user-card">
       <span class="avatar" aria-hidden="true">{{ initials }}</span>
       <div class="user-meta">
@@ -130,12 +128,6 @@ const initials = computed(() =>
 }
 @media (min-width: 1024px) {
   .menu-page { padding-top: 32px; }
-}
-.menu-hdr { padding: 8px 0 16px; }
-.menu-title {
-  font-size: 28px; font-weight: 600;
-  letter-spacing: -0.02em; line-height: 1.1;
-  color: var(--fg1); margin: 0;
 }
 .user-card {
   display: flex; align-items: center; gap: 12px;

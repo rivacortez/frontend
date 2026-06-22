@@ -747,7 +747,15 @@ function periodLabel(p: string): string {
 .rep-bars { display: flex; align-items: flex-end; gap: 7px; height: 100%; border-bottom: 1.5px solid var(--border); }
 .rep-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .rep-bar { width: 100%; max-width: 34px; background: var(--terracotta-300); border-radius: 5px 5px 0 0; transition: height 0.5s var(--ease-emphasis); min-height: 2px; }
-.rep-bar-col:first-child .rep-bar, .rep-bar-col:hover .rep-bar { background: var(--terracotta); }
+/* Paleta cálida categórica — cada barra con su color (más vida, sin salir de la marca) */
+.rep-bar-col:nth-child(7n+1) .rep-bar { background: var(--terracotta); }
+.rep-bar-col:nth-child(7n+2) .rep-bar { background: var(--mostaza); }
+.rep-bar-col:nth-child(7n+3) .rep-bar { background: var(--oliva); }
+.rep-bar-col:nth-child(7n+4) .rep-bar { background: #C98A5E; }
+.rep-bar-col:nth-child(7n+5) .rep-bar { background: var(--mostaza-700); }
+.rep-bar-col:nth-child(7n+6) .rep-bar { background: var(--oliva-700); }
+.rep-bar-col:nth-child(7n+7) .rep-bar { background: var(--terracotta-700); }
+.rep-bar-col:hover .rep-bar { filter: brightness(1.06) saturate(1.1); }
 .rep-bar-lbl { font-size: 10.5px; font-weight: 500; color: var(--fg3); margin-top: 7px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ============ Dish rows (dashboards) ============ */

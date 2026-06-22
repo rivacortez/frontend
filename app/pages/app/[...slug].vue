@@ -9,6 +9,8 @@ const route = useRoute()
 const attempted = computed(() => `/app/${((route.params.slug as string[] | undefined) ?? []).join('/')}`)
 
 useSeoMeta({ title: 'Ruta no encontrada — GastronomIA' })
+
+definePageHeader(() => ({ title: 'Ruta no encontrada' }))
 </script>
 
 <template>
