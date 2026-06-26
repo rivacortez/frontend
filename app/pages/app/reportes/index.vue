@@ -133,6 +133,42 @@ const paretoMax = computed(() =>
 const wasteReasonMax = computed(() =>
   Math.max(1, ...(waste.data.value?.byReason ?? []).map(r => num(r.cost))))
 
+/* ============ Derived (paneles de resumen lateral) ============ */
+// Pareto: distribución ABC (conteo + revenue por clase) para el panel lateral.
+const paretoAbc = computed(() => {
+  const acc = { A: { n: 0, rev: 0 }, B: { n: 0, rev: 0 }, C: { n: 0, rev: 0 } }
+  for (const it of pareto.data.value?.items ?? []) {
+    acc[it.abcClass].n += 1
+    acc[it.abcClass].rev += num(it.revenue)
+  }
+  return acc
+})
+
+// Inventario: conteo de insumos por estado de stock (para la barra del panel).
+const inventoryStatusCounts = computed(() => {
+  const acc = { ok: 0, low: 0, critical: 0 }
+  for (const it of inventory.data.value?.items ?? []) acc[it.status] += 1
+  return acc
+})
+
+// Food cost: comparación global vs objetivo + platos por encima del objetivo.
+const fcGlobal = computed(() => num(foodcost.data.value?.overallFoodCostPct))
+const fcTarget = computed(() => num(foodcost.data.value?.targetFoodCostPct))
+const fcOverTarget = computed(() => fcGlobal.value > fcTarget.value)
+const fcScale = computed(() => Math.max(1, fcGlobal.value, fcTarget.value) * 1.35)
+const fcGapPts = computed(() => Math.abs(fcGlobal.value - fcTarget.value).toFixed(1))
+const foodcostOverCount = computed(() => {
+  const target = fcTarget.value
+  return (foodcost.data.value?.dishes ?? []).filter(d => num(d.foodCostPct) > target).length
+})
+
+// Mermas: razón con mayor costo (para el panel lateral).
+const wasteTopReason = computed(() => {
+  const rows = waste.data.value?.byReason ?? []
+  if (!rows.length) return null
+  return rows.reduce((top, r) => (num(r.cost) > num(top.cost) ? r : top), rows[0])
+})
+
 /* ============ CSV export (HU-07-10) ============ */
 const downloadCsv = useReportCsv()
 const exporting = ref(false)
@@ -166,25 +202,29 @@ function periodLabel(p: string): string {
   <div class="rep">
     <UiScreenHeader title="Reportes" :subtitle="canManage ? 'KPIs, ventas y análisis' : 'Caja del día'" back="/app/menu" />
 
-    <!-- Tabs -->
-    <nav class="rep-tabs" role="tablist" aria-label="Secciones de reportes">
-      <button
-        v-for="t in tabs"
-        :key="t.id"
-        role="tab"
-        :aria-selected="tab === t.id"
-        class="rep-tab"
-        :class="{ active: tab === t.id }"
-        @click="tab = t.id"
-      >
-        <UIcon :name="t.icon" />
-        <span>{{ t.label }}</span>
-      </button>
-    </nav>
+    <!-- Tabs: barra full-bleed bajo el topbar -->
+    <div class="rep-tabbar">
+      <nav class="rep-tabs" role="tablist" aria-label="Secciones de reportes">
+        <button
+          v-for="t in tabs"
+          :key="t.id"
+          role="tab"
+          :aria-selected="tab === t.id"
+          class="rep-tab"
+          :class="{ active: tab === t.id }"
+          @click="tab = t.id"
+        >
+          <UIcon :name="t.icon" />
+          <span>{{ t.label }}</span>
+        </button>
+      </nav>
+    </div>
 
     <div class="rep-content">
       <!-- ============================ DASHBOARD ============================ -->
       <template v-if="tab === 'dashboard'">
+        <div class="scr-body">
+        <div class="scr-main">
         <!-- ---- Cajero (staff) ---- -->
         <template v-if="!canManage">
           <RepError v-if="cashier.error.value" @retry="cashier.refresh()" />
@@ -252,37 +292,39 @@ function periodLabel(p: string): string {
               </div>
             </div>
 
-            <section class="rep-card">
-              <div class="rep-card-head"><div class="rep-card-title">Ventas · últimos 7 días</div></div>
-              <div v-if="num(admin.data.value.revenue7d) > 0" class="rep-chart">
-                <div class="rep-bars">
-                  <div
-                    v-for="d in admin.data.value.salesByDay7d"
-                    :key="d.day"
-                    class="rep-bar-col"
-                    :aria-label="`${fmtDay(d.day)}: ${formatPEN(num(d.revenue))}`"
-                  >
-                    <div class="rep-bar" :style="{ height: `${Math.max(3, (num(d.revenue) / adminMaxRevenue) * 100)}%` }" />
-                    <div class="rep-bar-lbl">{{ fmtDay(d.day).split(' ')[0] }}</div>
+            <div class="rep-dash-split">
+              <section class="rep-card">
+                <div class="rep-card-head"><div class="rep-card-title">Ventas · últimos 7 días</div></div>
+                <div v-if="num(admin.data.value.revenue7d) > 0" class="rep-chart">
+                  <div class="rep-bars">
+                    <div
+                      v-for="d in admin.data.value.salesByDay7d"
+                      :key="d.day"
+                      class="rep-bar-col"
+                      :aria-label="`${fmtDay(d.day)}: ${formatPEN(num(d.revenue))}`"
+                    >
+                      <div class="rep-bar" :style="{ height: `${Math.max(3, (num(d.revenue) / adminMaxRevenue) * 100)}%` }" />
+                      <div class="rep-bar-lbl">{{ fmtDay(d.day).split(' ')[0] }}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <p v-else class="rep-muted">Aún no hay ventas en los últimos 7 días.</p>
-            </section>
+                <p v-else class="rep-muted">Aún no hay ventas en los últimos 7 días.</p>
+              </section>
 
-            <section v-if="admin.data.value.topDishes.length" class="rep-card">
-              <div class="rep-card-head"><div class="rep-card-title">Top platos de hoy</div></div>
-              <div v-for="(d, i) in admin.data.value.topDishes" :key="d.name" class="rep-dish">
-                <span class="rep-dish-pos" :class="{ first: i === 0 }">{{ i + 1 }}</span>
-                <span class="rep-dish-main">
-                  <span class="rep-dish-name">{{ d.name }}</span>
-                </span>
-                <span class="rep-dish-right">
-                  <span class="rep-dish-units">{{ formatPEN(num(d.revenue)) }}</span>
-                  <span class="rep-dish-sub">{{ d.qty }} und · contrib. {{ formatPEN(num(d.contribution)) }}</span>
-                </span>
-              </div>
-            </section>
+              <section v-if="admin.data.value.topDishes.length" class="rep-card">
+                <div class="rep-card-head"><div class="rep-card-title">Top platos de hoy</div></div>
+                <div v-for="(d, i) in admin.data.value.topDishes" :key="d.name" class="rep-dish">
+                  <span class="rep-dish-pos" :class="{ first: i === 0 }">{{ i + 1 }}</span>
+                  <span class="rep-dish-main">
+                    <span class="rep-dish-name">{{ d.name }}</span>
+                  </span>
+                  <span class="rep-dish-right">
+                    <span class="rep-dish-units">{{ formatPEN(num(d.revenue)) }}</span>
+                    <span class="rep-dish-sub">{{ d.qty }} und · contrib. {{ formatPEN(num(d.contribution)) }}</span>
+                  </span>
+                </div>
+              </section>
+            </div>
           </template>
         </template>
 
@@ -334,295 +376,476 @@ function periodLabel(p: string): string {
             />
           </template>
         </template>
+        </div>
+        </div>
       </template>
 
       <!-- ============================ VENTAS ============================ -->
       <template v-else-if="tab === 'ventas'">
-        <div class="rep-toolbar">
-          <div class="rep-presets" role="tablist" aria-label="Rango de fechas">
-            <button v-for="p in PRESETS" :key="p.key" role="tab" :aria-selected="preset === p.key" class="rep-preset" :class="{ active: preset === p.key }" @click="preset = p.key">{{ p.label }}</button>
+        <div class="rep-controls">
+          <div class="rep-toolbar">
+            <div class="rep-presets" role="tablist" aria-label="Rango de fechas">
+              <button v-for="p in PRESETS" :key="p.key" role="tab" :aria-selected="preset === p.key" class="rep-preset" :class="{ active: preset === p.key }" @click="preset = p.key">{{ p.label }}</button>
+            </div>
+            <button class="rep-export-btn sm" :disabled="exporting || !sales.data.value" @click="exportCsv('sales')">
+              <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
+            </button>
           </div>
-          <button class="rep-export-btn sm" :disabled="exporting || !sales.data.value" @click="exportCsv('sales')">
-            <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
-          </button>
+          <div class="rep-range-note">{{ rangeLabel }}</div>
         </div>
-        <div class="rep-range-note">{{ rangeLabel }}</div>
 
-        <RepError v-if="sales.error.value" @retry="sales.refresh()" />
-        <RepLoading v-else-if="sales.isLoading.value && !sales.data.value" />
-        <template v-else-if="sales.data.value">
-          <div class="rep-stat-grid three">
-            <div class="rep-stat accent">
-              <span class="rep-stat-k">Ingresos</span>
-              <span class="rep-stat-v"><span class="cur">S/</span>{{ num(sales.data.value.totalRevenue).toLocaleString('es-PE') }}</span>
-            </div>
-            <div class="rep-stat">
-              <span class="rep-stat-k">Ventas</span>
-              <span class="rep-stat-v">{{ sales.data.value.salesCount }}</span>
-            </div>
-            <div class="rep-stat">
-              <span class="rep-stat-k">Ticket prom.</span>
-              <span class="rep-stat-v">{{ formatPEN(num(sales.data.value.avgTicket)) }}</span>
-            </div>
-          </div>
-
-          <section class="rep-card">
-            <div class="rep-card-head">
-              <div class="rep-card-title">Serie de ventas</div>
-              <div class="rep-metric-toggle" role="tablist" aria-label="Agrupar la serie">
-                <button v-for="g in GROUP_OPTS" :key="g.id" role="tab" :aria-selected="salesGroupBy === g.id" :class="{ active: salesGroupBy === g.id }" @click="salesGroupBy = g.id">{{ g.label }}</button>
-              </div>
-            </div>
-            <div v-if="salesSeries.length" class="rep-chart">
-              <div class="rep-bars">
-                <div
-                  v-for="(p, i) in salesSeries"
-                  :key="i"
-                  class="rep-bar-col"
-                  :aria-label="`${seriesKeyLabel(p.key)}: ${formatPEN(num(p.revenue))}, ${p.count} ventas`"
-                >
-                  <div class="rep-bar" :style="{ height: `${Math.max(3, (num(p.revenue) / salesMax) * 100)}%` }" />
-                  <div class="rep-bar-lbl">{{ seriesKeyLabel(p.key) }}</div>
+        <div class="scr-body">
+          <div class="scr-main">
+            <RepError v-if="sales.error.value" @retry="sales.refresh()" />
+            <RepLoading v-else-if="sales.isLoading.value && !sales.data.value" />
+            <template v-else-if="sales.data.value">
+              <div class="rep-stat-grid three">
+                <div class="rep-stat accent">
+                  <span class="rep-stat-k">Ingresos</span>
+                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(sales.data.value.totalRevenue).toLocaleString('es-PE') }}</span>
+                </div>
+                <div class="rep-stat">
+                  <span class="rep-stat-k">Ventas</span>
+                  <span class="rep-stat-v">{{ sales.data.value.salesCount }}</span>
+                </div>
+                <div class="rep-stat">
+                  <span class="rep-stat-k">Ticket prom.</span>
+                  <span class="rep-stat-v">{{ formatPEN(num(sales.data.value.avgTicket)) }}</span>
                 </div>
               </div>
-            </div>
-            <p v-else class="rep-muted">Sin ventas en este rango.</p>
 
-            <div class="rep-table-wrap">
-              <table class="rep-table">
-                <thead><tr><th class="left">{{ salesGroupBy === 'day' ? 'Día' : salesGroupBy === 'method' ? 'Método' : 'Comprobante' }}</th><th>Ventas</th><th>Ingresos</th></tr></thead>
-                <tbody>
-                  <tr v-for="(p, i) in salesSeries" :key="i">
-                    <td class="left name">{{ seriesKeyLabel(p.key) }}</td>
-                    <td>{{ p.count }}</td>
-                    <td class="strong">{{ formatPEN(num(p.revenue)) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </template>
+              <section class="rep-card">
+                <div class="rep-card-head">
+                  <div class="rep-card-title">Serie de ventas</div>
+                  <div class="rep-metric-toggle" role="tablist" aria-label="Agrupar la serie">
+                    <button v-for="g in GROUP_OPTS" :key="g.id" role="tab" :aria-selected="salesGroupBy === g.id" :class="{ active: salesGroupBy === g.id }" @click="salesGroupBy = g.id">{{ g.label }}</button>
+                  </div>
+                </div>
+                <div v-if="salesSeries.length" class="rep-chart">
+                  <div class="rep-bars">
+                    <div
+                      v-for="(p, i) in salesSeries"
+                      :key="i"
+                      class="rep-bar-col"
+                      :aria-label="`${seriesKeyLabel(p.key)}: ${formatPEN(num(p.revenue))}, ${p.count} ventas`"
+                    >
+                      <div class="rep-bar" :style="{ height: `${Math.max(3, (num(p.revenue) / salesMax) * 100)}%` }" />
+                      <div class="rep-bar-lbl">{{ seriesKeyLabel(p.key) }}</div>
+                    </div>
+                  </div>
+                </div>
+                <p v-else class="rep-muted">Sin ventas en este rango.</p>
+
+                <div class="rep-table-wrap">
+                  <table class="rep-table">
+                    <thead><tr><th class="left">{{ salesGroupBy === 'day' ? 'Día' : salesGroupBy === 'method' ? 'Método' : 'Comprobante' }}</th><th>Ventas</th><th>Ingresos</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(p, i) in salesSeries" :key="i">
+                        <td class="left name">{{ seriesKeyLabel(p.key) }}</td>
+                        <td>{{ p.count }}</td>
+                        <td class="strong">{{ formatPEN(num(p.revenue)) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </template>
+          </div>
+
+          <aside v-if="sales.data.value" class="scr-aside">
+            <section class="scr-panel">
+              <header class="scr-panel-head">
+                <span class="scr-eyebrow">Ventas · {{ rangeLabel }}</span>
+                <h3 class="scr-panel-title">{{ sales.data.value.salesCount }}<span class="scr-of"> ventas</span></h3>
+              </header>
+              <dl class="scr-stats">
+                <div class="scr-stat"><dt>Ingresos</dt><dd>{{ formatPEN(num(sales.data.value.totalRevenue)) }}</dd></div>
+                <div class="scr-stat"><dt>Ticket promedio</dt><dd>{{ formatPEN(num(sales.data.value.avgTicket)) }}</dd></div>
+              </dl>
+
+              <div class="rep-aside-block">
+                <div class="rep-aside-label">Por método de pago</div>
+                <div class="rep-methods">
+                  <div v-for="m in [
+                    { k: 'Efectivo', v: sales.data.value.byMethod.cash, c: 'var(--oliva)' },
+                    { k: 'Tarjeta', v: sales.data.value.byMethod.card, c: 'var(--mostaza)' },
+                    { k: 'Yape', v: sales.data.value.byMethod.yape, c: 'var(--terracotta)' },
+                    { k: 'Plin', v: sales.data.value.byMethod.plin, c: 'var(--espresso-400)' },
+                  ]" :key="m.k" class="rep-method">
+                    <span class="rep-method-dot" :style="{ background: m.c }" />
+                    <span class="rep-method-k">{{ m.k }}</span>
+                    <span class="rep-method-v">{{ formatPEN(num(m.v)) }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rep-aside-block">
+                <div class="rep-aside-label">Por comprobante</div>
+                <div class="rep-methods">
+                  <div v-for="m in [
+                    { k: 'Boleta', v: sales.data.value.byDocType.boleta, c: 'var(--espresso-400)' },
+                    { k: 'Factura', v: sales.data.value.byDocType.factura, c: 'var(--terracotta)' },
+                  ]" :key="m.k" class="rep-method">
+                    <span class="rep-method-dot" :style="{ background: m.c }" />
+                    <span class="rep-method-k">{{ m.k }}</span>
+                    <span class="rep-method-v">{{ formatPEN(num(m.v)) }}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
       </template>
 
       <!-- ============================ PARETO ============================ -->
       <template v-else-if="tab === 'pareto'">
-        <div class="rep-toolbar">
-          <div class="rep-presets" role="tablist" aria-label="Rango de fechas">
-            <button v-for="p in PRESETS" :key="p.key" role="tab" :aria-selected="preset === p.key" class="rep-preset" :class="{ active: preset === p.key }" @click="preset = p.key">{{ p.label }}</button>
+        <div class="rep-controls">
+          <div class="rep-toolbar">
+            <div class="rep-presets" role="tablist" aria-label="Rango de fechas">
+              <button v-for="p in PRESETS" :key="p.key" role="tab" :aria-selected="preset === p.key" class="rep-preset" :class="{ active: preset === p.key }" @click="preset = p.key">{{ p.label }}</button>
+            </div>
           </div>
+          <div class="rep-range-note">{{ rangeLabel }}</div>
         </div>
-        <div class="rep-range-note">{{ rangeLabel }}</div>
 
-        <RepError v-if="pareto.error.value" @retry="pareto.refresh()" />
-        <RepLoading v-else-if="pareto.isLoading.value && !pareto.data.value" />
-        <template v-else-if="pareto.data.value">
-          <section v-if="pareto.data.value.items.length" class="rep-card">
-            <div class="rep-card-head">
-              <div class="rep-card-title">Pareto de platos (ABC)</div>
-              <span class="rep-card-meta">Total {{ formatPEN(num(pareto.data.value.totalRevenue)) }}</span>
-            </div>
-            <p class="rep-hint"><UIcon name="i-lucide-info" /> Clase A = 80% del ingreso (estrellas), B hasta 95%, C el resto. Acumulado por revenue.</p>
-            <div v-for="it in pareto.data.value.items" :key="it.name" class="rep-pareto-row">
-              <span class="rep-abc" :class="`abc-${it.abcClass.toLowerCase()}`">{{ it.abcClass }}</span>
-              <div class="rep-pareto-main">
-                <div class="rep-pareto-top">
-                  <span class="rep-pareto-name">{{ it.name }}</span>
-                  <span class="rep-pareto-rev">{{ formatPEN(num(it.revenue)) }}</span>
+        <div class="scr-body">
+          <div class="scr-main">
+            <RepError v-if="pareto.error.value" @retry="pareto.refresh()" />
+            <RepLoading v-else-if="pareto.isLoading.value && !pareto.data.value" />
+            <template v-else-if="pareto.data.value">
+              <section v-if="pareto.data.value.items.length" class="rep-card">
+                <div class="rep-card-head">
+                  <div class="rep-card-title">Pareto de platos (ABC)</div>
+                  <span class="rep-card-meta">Total {{ formatPEN(num(pareto.data.value.totalRevenue)) }}</span>
                 </div>
-                <div class="rep-dish-track">
-                  <span class="rep-dish-fill" :class="`abc-${it.abcClass.toLowerCase()}`" :style="{ width: `${(num(it.revenue) / paretoMax) * 100}%` }" />
+                <p class="rep-hint"><UIcon name="i-lucide-info" /> Clase A = 80% del ingreso (estrellas), B hasta 95%, C el resto. Acumulado por revenue.</p>
+                <div v-for="it in pareto.data.value.items" :key="it.name" class="rep-pareto-row">
+                  <span class="rep-abc" :class="`abc-${it.abcClass.toLowerCase()}`">{{ it.abcClass }}</span>
+                  <div class="rep-pareto-main">
+                    <div class="rep-pareto-top">
+                      <span class="rep-pareto-name">{{ it.name }}</span>
+                      <span class="rep-pareto-rev">{{ formatPEN(num(it.revenue)) }}</span>
+                    </div>
+                    <div class="rep-dish-track">
+                      <span class="rep-dish-fill" :class="`abc-${it.abcClass.toLowerCase()}`" :style="{ width: `${(num(it.revenue) / paretoMax) * 100}%` }" />
+                    </div>
+                    <div class="rep-pareto-sub">
+                      {{ it.qty }} und · {{ fmtPct(it.revenuePct) }} del total · acum. {{ fmtPct(it.cumulativePct) }} · {{ abcClassLabel(it.abcClass) }}
+                    </div>
+                  </div>
                 </div>
-                <div class="rep-pareto-sub">
-                  {{ it.qty }} und · {{ fmtPct(it.revenuePct) }} del total · acum. {{ fmtPct(it.cumulativePct) }} · {{ abcClassLabel(it.abcClass) }}
-                </div>
+              </section>
+              <UiEmptyState
+                v-else
+                icon="i-lucide-trophy"
+                title="Sin ventas en este rango"
+                subtitle="El análisis Pareto/ABC necesita ventas emitidas para clasificar los platos."
+              />
+            </template>
+          </div>
+
+          <aside v-if="pareto.data.value && pareto.data.value.items.length" class="scr-aside">
+            <section class="scr-panel">
+              <header class="scr-panel-head">
+                <span class="scr-eyebrow">Pareto · ABC</span>
+                <h3 class="scr-panel-title">{{ pareto.data.value.items.length }}<span class="scr-of"> platos</span></h3>
+              </header>
+              <div class="rep-seg-bar" role="img" aria-label="Distribución del ingreso por clase ABC">
+                <span class="rep-seg s-a" :style="{ flexGrow: paretoAbc.A.rev || 0.001 }" />
+                <span class="rep-seg s-b" :style="{ flexGrow: paretoAbc.B.rev || 0.001 }" />
+                <span class="rep-seg s-c" :style="{ flexGrow: paretoAbc.C.rev || 0.001 }" />
               </div>
-            </div>
-          </section>
-          <UiEmptyState
-            v-else
-            icon="i-lucide-trophy"
-            title="Sin ventas en este rango"
-            subtitle="El análisis Pareto/ABC necesita ventas emitidas para clasificar los platos."
-          />
-        </template>
+              <dl class="scr-stats">
+                <div class="scr-stat"><dt><span class="rep-seg-dot s-a" />Estrellas (A)</dt><dd>{{ paretoAbc.A.n }}</dd></div>
+                <div class="scr-stat"><dt><span class="rep-seg-dot s-b" />Soporte (B)</dt><dd>{{ paretoAbc.B.n }}</dd></div>
+                <div class="scr-stat"><dt><span class="rep-seg-dot s-c" />Cola (C)</dt><dd>{{ paretoAbc.C.n }}</dd></div>
+              </dl>
+              <p class="rep-aside-foot">Las clase A concentran la mayor parte del ingreso: protegé su disponibilidad y su margen.</p>
+            </section>
+          </aside>
+        </div>
       </template>
 
       <!-- ============================ INVENTARIO ============================ -->
       <template v-else-if="tab === 'inventario'">
-        <div class="rep-toolbar end">
-          <button class="rep-export-btn sm" :disabled="exporting || !inventory.data.value" @click="exportCsv('inventory')">
-            <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
-          </button>
+        <div class="rep-controls">
+          <div class="rep-toolbar end">
+            <button class="rep-export-btn sm" :disabled="exporting || !inventory.data.value" @click="exportCsv('inventory')">
+              <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
+            </button>
+          </div>
         </div>
 
-        <RepError v-if="inventory.error.value" @retry="inventory.refresh()" />
-        <RepLoading v-else-if="inventory.isLoading.value && !inventory.data.value" />
-        <template v-else-if="inventory.data.value">
-          <div class="rep-stat-grid">
-            <div class="rep-stat accent">
-              <span class="rep-stat-k">Valor del stock</span>
-              <span class="rep-stat-v"><span class="cur">S/</span>{{ num(inventory.data.value.totalStockValue).toLocaleString('es-PE') }}</span>
-              <span class="rep-stat-meta">{{ inventory.data.value.totalSkus }} insumos</span>
-            </div>
-            <div class="rep-stat">
-              <span class="rep-stat-k">Stock bajo</span>
-              <span class="rep-stat-v" :class="{ 'danger-fg': inventory.data.value.lowStockCount > 0 }">{{ inventory.data.value.lowStockCount }}</span>
-            </div>
-            <div class="rep-stat">
-              <span class="rep-stat-k">Críticos</span>
-              <span class="rep-stat-v" :class="{ 'danger-fg': inventory.data.value.criticalCount > 0 }">{{ inventory.data.value.criticalCount }}</span>
-            </div>
+        <div class="scr-body">
+          <div class="scr-main">
+            <RepError v-if="inventory.error.value" @retry="inventory.refresh()" />
+            <RepLoading v-else-if="inventory.isLoading.value && !inventory.data.value" />
+            <template v-else-if="inventory.data.value">
+              <div class="rep-stat-grid">
+                <div class="rep-stat accent">
+                  <span class="rep-stat-k">Valor del stock</span>
+                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(inventory.data.value.totalStockValue).toLocaleString('es-PE') }}</span>
+                  <span class="rep-stat-meta">{{ inventory.data.value.totalSkus }} insumos</span>
+                </div>
+                <div class="rep-stat">
+                  <span class="rep-stat-k">Stock bajo</span>
+                  <span class="rep-stat-v" :class="{ 'danger-fg': inventory.data.value.lowStockCount > 0 }">{{ inventory.data.value.lowStockCount }}</span>
+                </div>
+                <div class="rep-stat">
+                  <span class="rep-stat-k">Críticos</span>
+                  <span class="rep-stat-v" :class="{ 'danger-fg': inventory.data.value.criticalCount > 0 }">{{ inventory.data.value.criticalCount }}</span>
+                </div>
+              </div>
+
+              <section v-if="inventory.data.value.items.length" class="rep-card">
+                <div class="rep-card-head"><div class="rep-card-title">Valoración por insumo</div></div>
+                <div class="rep-table-wrap">
+                  <table class="rep-table">
+                    <thead><tr><th class="left">Insumo</th><th>Stock</th><th>Costo u.</th><th>Valor</th><th class="left">Estado</th></tr></thead>
+                    <tbody>
+                      <tr v-for="it in inventory.data.value.items" :key="it.ingredientId" :class="{ low: it.status !== 'ok' }">
+                        <td class="left name">{{ it.name }}</td>
+                        <td>{{ num(it.stock).toLocaleString('es-PE') }} <small>{{ it.unit }}</small></td>
+                        <td>{{ formatPEN(num(it.unitCost)) }}</td>
+                        <td class="strong">{{ formatPEN(num(it.stockValue)) }}</td>
+                        <td class="left"><span class="rep-status" :class="statusClass(it.status)">{{ statusLabel(it.status) }}</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <UiEmptyState v-else icon="i-lucide-package" title="Sin insumos" subtitle="Registra insumos en Inventario para ver la valoración del stock." />
+            </template>
           </div>
 
-          <section v-if="inventory.data.value.items.length" class="rep-card">
-            <div class="rep-card-head"><div class="rep-card-title">Valoración por insumo</div></div>
-            <div class="rep-table-wrap">
-              <table class="rep-table">
-                <thead><tr><th class="left">Insumo</th><th>Stock</th><th>Costo u.</th><th>Valor</th><th class="left">Estado</th></tr></thead>
-                <tbody>
-                  <tr v-for="it in inventory.data.value.items" :key="it.ingredientId" :class="{ low: it.status !== 'ok' }">
-                    <td class="left name">{{ it.name }}</td>
-                    <td>{{ num(it.stock).toLocaleString('es-PE') }} <small>{{ it.unit }}</small></td>
-                    <td>{{ formatPEN(num(it.unitCost)) }}</td>
-                    <td class="strong">{{ formatPEN(num(it.stockValue)) }}</td>
-                    <td class="left"><span class="rep-status" :class="statusClass(it.status)">{{ statusLabel(it.status) }}</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <UiEmptyState v-else icon="i-lucide-package" title="Sin insumos" subtitle="Registra insumos en Inventario para ver la valoración del stock." />
-        </template>
+          <aside v-if="inventory.data.value && inventory.data.value.items.length" class="scr-aside">
+            <section class="scr-panel">
+              <header class="scr-panel-head">
+                <span class="scr-eyebrow">Inventario</span>
+                <h3 class="scr-panel-title">{{ inventory.data.value.totalSkus }}<span class="scr-of"> insumos</span></h3>
+              </header>
+              <div class="rep-seg-bar" role="img" aria-label="Distribución de insumos por estado de stock">
+                <span class="rep-seg s-ok" :style="{ flexGrow: inventoryStatusCounts.ok || 0.001 }" />
+                <span class="rep-seg s-low" :style="{ flexGrow: inventoryStatusCounts.low || 0.001 }" />
+                <span class="rep-seg s-crit" :style="{ flexGrow: inventoryStatusCounts.critical || 0.001 }" />
+              </div>
+              <dl class="scr-stats">
+                <div class="scr-stat"><dt><span class="rep-seg-dot s-ok" />Óptimo</dt><dd>{{ inventoryStatusCounts.ok }}</dd></div>
+                <div class="scr-stat"><dt><span class="rep-seg-dot s-low" />Bajo</dt><dd :class="{ warn: inventoryStatusCounts.low > 0 }">{{ inventoryStatusCounts.low }}</dd></div>
+                <div class="scr-stat"><dt><span class="rep-seg-dot s-crit" />Crítico</dt><dd :class="{ danger: inventoryStatusCounts.critical > 0 }">{{ inventoryStatusCounts.critical }}</dd></div>
+              </dl>
+              <NuxtLink v-if="inventory.data.value.lowStockCount > 0" to="/app/inventario" class="rep-aside-cta">
+                <UIcon name="i-lucide-shopping-cart" /> Reponer {{ inventory.data.value.lowStockCount }} insumo{{ inventory.data.value.lowStockCount === 1 ? '' : 's' }}
+                <UIcon name="i-lucide-arrow-right" />
+              </NuxtLink>
+              <p v-else class="rep-aside-foot">Todo el stock está por encima del mínimo.</p>
+            </section>
+          </aside>
+        </div>
       </template>
 
       <!-- ============================ FOOD COST ============================ -->
       <template v-else-if="tab === 'foodcost'">
-        <div class="rep-toolbar">
-          <label class="rep-period-field">
-            <span>Período</span>
-            <input v-model="period" type="month" aria-label="Período (mes)">
-          </label>
-          <button class="rep-export-btn sm" :disabled="exporting || !foodcost.data.value" @click="exportCsv('food-cost')">
-            <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
-          </button>
+        <div class="rep-controls">
+          <div class="rep-toolbar">
+            <label class="rep-period-field">
+              <span>Período</span>
+              <input v-model="period" type="month" aria-label="Período (mes)">
+            </label>
+            <button class="rep-export-btn sm" :disabled="exporting || !foodcost.data.value" @click="exportCsv('food-cost')">
+              <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
+            </button>
+          </div>
         </div>
 
-        <RepError v-if="foodcost.error.value" @retry="foodcost.refresh()" />
-        <RepLoading v-else-if="foodcost.isLoading.value && !foodcost.data.value" />
-        <template v-else-if="foodcost.data.value">
-          <div class="rep-stat-grid two">
-            <div class="rep-stat accent">
-              <span class="rep-stat-k">Food cost global</span>
-              <span class="rep-stat-v">{{ fmtPct(foodcost.data.value.overallFoodCostPct) }}</span>
-              <span class="rep-stat-meta">{{ periodLabel(period) }}</span>
-            </div>
-            <div class="rep-stat">
-              <span class="rep-stat-k">Objetivo</span>
-              <span class="rep-stat-v">{{ fmtPct(foodcost.data.value.targetFoodCostPct) }}</span>
-              <span class="rep-stat-meta">referencia</span>
-            </div>
+        <div class="scr-body">
+          <div class="scr-main">
+            <RepError v-if="foodcost.error.value" @retry="foodcost.refresh()" />
+            <RepLoading v-else-if="foodcost.isLoading.value && !foodcost.data.value" />
+            <template v-else-if="foodcost.data.value">
+              <div class="rep-stat-grid two">
+                <div class="rep-stat accent">
+                  <span class="rep-stat-k">Food cost global</span>
+                  <span class="rep-stat-v">{{ fmtPct(foodcost.data.value.overallFoodCostPct) }}</span>
+                  <span class="rep-stat-meta">{{ periodLabel(period) }}</span>
+                </div>
+                <div class="rep-stat">
+                  <span class="rep-stat-k">Objetivo</span>
+                  <span class="rep-stat-v">{{ fmtPct(foodcost.data.value.targetFoodCostPct) }}</span>
+                  <span class="rep-stat-meta">referencia</span>
+                </div>
+              </div>
+
+              <section v-if="foodcost.data.value.dishes.length" class="rep-card">
+                <div class="rep-card-head"><div class="rep-card-title">Food cost por plato</div></div>
+                <p class="rep-hint"><UIcon name="i-lucide-info" /> Food cost % = costo de ingredientes ÷ precio. Resaltado en rojo lo que supera el objetivo ({{ fmtPct(foodcost.data.value.targetFoodCostPct) }}).</p>
+                <div class="rep-table-wrap">
+                  <table class="rep-table">
+                    <thead><tr><th class="left">Plato</th><th>Precio</th><th>Ingred.</th><th>Food&nbsp;cost</th><th>Uds.</th><th>Ingresos</th></tr></thead>
+                    <tbody>
+                      <tr v-for="d in foodcost.data.value.dishes" :key="d.name" :class="{ low: foodCostClass(num(d.foodCostPct), num(foodcost.data.value.targetFoodCostPct)) === 'bad' }">
+                        <td class="left name">{{ d.name }}</td>
+                        <td>{{ formatPEN(num(d.sellPrice)) }}</td>
+                        <td>{{ formatPEN(num(d.ingredientCost)) }}</td>
+                        <td><span class="rep-fc" :class="foodCostClass(num(d.foodCostPct), num(foodcost.data.value.targetFoodCostPct))">{{ fmtPct(d.foodCostPct) }}</span></td>
+                        <td>{{ d.unitsSold }}</td>
+                        <td class="strong">{{ formatPEN(num(d.revenue)) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <UiEmptyState v-else icon="i-lucide-percent" :title="`Sin platos activos en ${periodLabel(period)}`" subtitle="Activa platos con receta y registra ventas para calcular el food cost." />
+            </template>
           </div>
 
-          <section v-if="foodcost.data.value.dishes.length" class="rep-card">
-            <div class="rep-card-head"><div class="rep-card-title">Food cost por plato</div></div>
-            <p class="rep-hint"><UIcon name="i-lucide-info" /> Food cost % = costo de ingredientes ÷ precio. Resaltado en rojo lo que supera el objetivo ({{ fmtPct(foodcost.data.value.targetFoodCostPct) }}).</p>
-            <div class="rep-table-wrap">
-              <table class="rep-table">
-                <thead><tr><th class="left">Plato</th><th>Precio</th><th>Ingred.</th><th>Food&nbsp;cost</th><th>Uds.</th><th>Ingresos</th></tr></thead>
-                <tbody>
-                  <tr v-for="d in foodcost.data.value.dishes" :key="d.name" :class="{ low: foodCostClass(num(d.foodCostPct), num(foodcost.data.value.targetFoodCostPct)) === 'bad' }">
-                    <td class="left name">{{ d.name }}</td>
-                    <td>{{ formatPEN(num(d.sellPrice)) }}</td>
-                    <td>{{ formatPEN(num(d.ingredientCost)) }}</td>
-                    <td><span class="rep-fc" :class="foodCostClass(num(d.foodCostPct), num(foodcost.data.value.targetFoodCostPct))">{{ fmtPct(d.foodCostPct) }}</span></td>
-                    <td>{{ d.unitsSold }}</td>
-                    <td class="strong">{{ formatPEN(num(d.revenue)) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <UiEmptyState v-else icon="i-lucide-percent" :title="`Sin platos activos en ${periodLabel(period)}`" subtitle="Activa platos con receta y registra ventas para calcular el food cost." />
-        </template>
+          <aside v-if="foodcost.data.value && foodcost.data.value.dishes.length" class="scr-aside">
+            <section class="scr-panel">
+              <header class="scr-panel-head">
+                <span class="scr-eyebrow">Food cost · {{ periodLabel(period) }}</span>
+                <h3 class="scr-panel-title">{{ fmtPct(foodcost.data.value.overallFoodCostPct) }}<span class="scr-of"> global</span></h3>
+              </header>
+              <div class="rep-gauge">
+                <div class="rep-gauge-row">
+                  <span class="rep-gauge-k">Global</span>
+                  <div class="rep-gauge-track"><span class="rep-gauge-fill" :class="fcOverTarget ? 'bad' : 'good'" :style="{ width: `${Math.min(100, (fcGlobal / fcScale) * 100)}%` }" /></div>
+                  <span class="rep-gauge-v">{{ fmtPct(foodcost.data.value.overallFoodCostPct) }}</span>
+                </div>
+                <div class="rep-gauge-row">
+                  <span class="rep-gauge-k">Objetivo</span>
+                  <div class="rep-gauge-track"><span class="rep-gauge-fill target" :style="{ width: `${Math.min(100, (fcTarget / fcScale) * 100)}%` }" /></div>
+                  <span class="rep-gauge-v">{{ fmtPct(foodcost.data.value.targetFoodCostPct) }}</span>
+                </div>
+              </div>
+              <dl class="scr-stats">
+                <div class="scr-stat"><dt>Platos sobre objetivo</dt><dd :class="{ danger: foodcostOverCount > 0 }">{{ foodcostOverCount }}</dd></div>
+                <div class="scr-stat"><dt>Platos activos</dt><dd>{{ foodcost.data.value.dishes.length }}</dd></div>
+              </dl>
+              <p class="rep-aside-note" :class="fcOverTarget ? 'bad' : 'good'">
+                <UIcon :name="fcOverTarget ? 'i-lucide-trending-up' : 'i-lucide-check'" />
+                <span>{{ fcOverTarget
+                  ? `El food cost global supera el objetivo en ${fcGapPts} pts.`
+                  : 'El food cost global está dentro del objetivo.' }}</span>
+              </p>
+            </section>
+          </aside>
+        </div>
       </template>
 
       <!-- ============================ MERMAS ============================ -->
       <template v-else-if="tab === 'mermas'">
-        <div class="rep-toolbar">
-          <div class="rep-presets" role="tablist" aria-label="Rango de fechas">
-            <button v-for="p in PRESETS" :key="p.key" role="tab" :aria-selected="preset === p.key" class="rep-preset" :class="{ active: preset === p.key }" @click="preset = p.key">{{ p.label }}</button>
+        <div class="rep-controls">
+          <div class="rep-toolbar">
+            <div class="rep-presets" role="tablist" aria-label="Rango de fechas">
+              <button v-for="p in PRESETS" :key="p.key" role="tab" :aria-selected="preset === p.key" class="rep-preset" :class="{ active: preset === p.key }" @click="preset = p.key">{{ p.label }}</button>
+            </div>
+            <button class="rep-export-btn sm" :disabled="exporting || !waste.data.value" @click="exportCsv('waste')">
+              <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
+            </button>
           </div>
-          <button class="rep-export-btn sm" :disabled="exporting || !waste.data.value" @click="exportCsv('waste')">
-            <UIcon :name="exporting ? 'i-lucide-loader-circle' : 'i-lucide-download'" :class="{ spin: exporting }" /> CSV
-          </button>
+          <div class="rep-range-note">{{ rangeLabel }}</div>
         </div>
-        <div class="rep-range-note">{{ rangeLabel }}</div>
 
-        <RepError v-if="waste.error.value" @retry="waste.refresh()" />
-        <RepLoading v-else-if="waste.isLoading.value && !waste.data.value" />
-        <template v-else-if="waste.data.value">
-          <div class="rep-stat-grid two">
-            <div class="rep-stat accent">
-              <span class="rep-stat-k">Costo de mermas</span>
-              <span class="rep-stat-v"><span class="cur">S/</span>{{ num(waste.data.value.totalWasteCost).toLocaleString('es-PE') }}</span>
-            </div>
-            <div class="rep-stat">
-              <span class="rep-stat-k">Cantidad total</span>
-              <span class="rep-stat-v">{{ num(waste.data.value.totalWasteQty).toLocaleString('es-PE') }}</span>
-              <span class="rep-stat-meta">unidades de insumo</span>
-            </div>
-          </div>
-
-          <template v-if="waste.data.value.movements.length">
-            <section v-if="waste.data.value.byReason.length" class="rep-card">
-              <div class="rep-card-head"><div class="rep-card-title">Por razón</div></div>
-              <div v-for="r in waste.data.value.byReason" :key="r.reason" class="rep-pareto-row">
-                <div class="rep-pareto-main">
-                  <div class="rep-pareto-top">
-                    <span class="rep-pareto-name capitalize">{{ r.reason }}</span>
-                    <span class="rep-pareto-rev">{{ formatPEN(num(r.cost)) }}</span>
-                  </div>
-                  <div class="rep-dish-track">
-                    <span class="rep-dish-fill" :style="{ width: `${(num(r.cost) / wasteReasonMax) * 100}%` }" />
-                  </div>
+        <div class="scr-body">
+          <div class="scr-main">
+            <RepError v-if="waste.error.value" @retry="waste.refresh()" />
+            <RepLoading v-else-if="waste.isLoading.value && !waste.data.value" />
+            <template v-else-if="waste.data.value">
+              <div class="rep-stat-grid two">
+                <div class="rep-stat accent">
+                  <span class="rep-stat-k">Costo de mermas</span>
+                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(waste.data.value.totalWasteCost).toLocaleString('es-PE') }}</span>
+                </div>
+                <div class="rep-stat">
+                  <span class="rep-stat-k">Cantidad total</span>
+                  <span class="rep-stat-v">{{ num(waste.data.value.totalWasteQty).toLocaleString('es-PE') }}</span>
+                  <span class="rep-stat-meta">unidades de insumo</span>
                 </div>
               </div>
-            </section>
 
-            <section v-if="waste.data.value.byIngredient.length" class="rep-card">
-              <div class="rep-card-head"><div class="rep-card-title">Por insumo</div></div>
-              <div class="rep-table-wrap">
-                <table class="rep-table">
-                  <thead><tr><th class="left">Insumo</th><th>Cantidad</th><th>Costo</th></tr></thead>
-                  <tbody>
-                    <tr v-for="ing in waste.data.value.byIngredient" :key="ing.ingredientId">
-                      <td class="left name">{{ ing.name }}</td>
-                      <td>{{ num(ing.qty).toLocaleString('es-PE') }}</td>
-                      <td class="strong">{{ formatPEN(num(ing.cost)) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <template v-if="waste.data.value.movements.length">
+                <section v-if="waste.data.value.byReason.length" class="rep-card">
+                  <div class="rep-card-head"><div class="rep-card-title">Por razón</div></div>
+                  <div v-for="r in waste.data.value.byReason" :key="r.reason" class="rep-pareto-row">
+                    <div class="rep-pareto-main">
+                      <div class="rep-pareto-top">
+                        <span class="rep-pareto-name capitalize">{{ r.reason }}</span>
+                        <span class="rep-pareto-rev">{{ formatPEN(num(r.cost)) }}</span>
+                      </div>
+                      <div class="rep-dish-track">
+                        <span class="rep-dish-fill" :style="{ width: `${(num(r.cost) / wasteReasonMax) * 100}%` }" />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section v-if="waste.data.value.byIngredient.length" class="rep-card">
+                  <div class="rep-card-head"><div class="rep-card-title">Por insumo</div></div>
+                  <div class="rep-table-wrap">
+                    <table class="rep-table">
+                      <thead><tr><th class="left">Insumo</th><th>Cantidad</th><th>Costo</th></tr></thead>
+                      <tbody>
+                        <tr v-for="ing in waste.data.value.byIngredient" :key="ing.ingredientId">
+                          <td class="left name">{{ ing.name }}</td>
+                          <td>{{ num(ing.qty).toLocaleString('es-PE') }}</td>
+                          <td class="strong">{{ formatPEN(num(ing.cost)) }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </template>
+              <UiEmptyState v-else icon="i-lucide-trash-2" title="Sin mermas en este rango" subtitle="No se registraron salidas por merma. Las mermas se registran en Inventario." />
+            </template>
+          </div>
+
+          <aside v-if="waste.data.value && waste.data.value.movements.length" class="scr-aside">
+            <section class="scr-panel">
+              <header class="scr-panel-head">
+                <span class="scr-eyebrow">Mermas · {{ rangeLabel }}</span>
+                <h3 class="scr-panel-title">{{ formatPEN(num(waste.data.value.totalWasteCost)) }}<span class="scr-of"> en pérdidas</span></h3>
+              </header>
+              <dl class="scr-stats">
+                <div v-if="wasteTopReason" class="scr-stat"><dt>Razón principal</dt><dd class="capitalize">{{ wasteTopReason.reason }}</dd></div>
+                <div v-if="wasteTopReason" class="scr-stat"><dt>Costo de esa razón</dt><dd>{{ formatPEN(num(wasteTopReason.cost)) }}</dd></div>
+                <div class="scr-stat"><dt>Insumos afectados</dt><dd>{{ waste.data.value.byIngredient.length }}</dd></div>
+              </dl>
+              <p class="rep-aside-foot">Registrá las salidas por merma desde Inventario para mantener el costeo y el food cost al día.</p>
             </section>
-          </template>
-          <UiEmptyState v-else icon="i-lucide-trash-2" title="Sin mermas en este rango" subtitle="No se registraron salidas por merma. Las mermas se registran en Inventario." />
-        </template>
+          </aside>
+        </div>
       </template>
     </div>
   </div>
 </template>
 
 <style scoped>
-.rep { max-width: 860px; margin: 0 auto; padding-bottom: 24px; }
+/* Full-width: el layout app.vue ya acota por el sidebar; aquí usamos todo el ancho. */
+.rep { padding-bottom: 0; }
 
 /* ============ Tabs ============ */
+/* Barra full-bleed (mismo lenguaje que .scr-toolbar): blanca, bajo el topbar. */
+.rep-tabbar {
+  background: var(--pure-white);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 20px;
+  margin-bottom: 16px;
+}
 .rep-tabs {
   display: flex; gap: 6px;
-  padding: 0 20px 12px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .rep-tabs::-webkit-scrollbar { display: none; }
+@media (max-width: 1023px) {
+  .rep-tabbar { padding: 8px 16px; }
+}
+
+/* Gutter de los controles por tab (presets / período / export): alinea con .scr-body. */
+.rep-controls { padding: 0 20px; }
+@media (max-width: 1023px) {
+  .rep-controls { padding: 0 16px; }
+}
 .rep-tab {
   flex: 0 0 auto;
   display: inline-flex; align-items: center; gap: 6px;
@@ -639,7 +862,8 @@ function periodLabel(p: string): string {
 .rep-tab.active { background: var(--terracotta); color: var(--crema-100); border-color: var(--terracotta); }
 .rep-tab :deep(svg) { width: 15px; height: 15px; }
 
-.rep-content { padding: 0 20px; }
+/* El gutter horizontal ahora lo dan .rep-controls y .scr-body; el wrapper no aporta padding. */
+.rep-content { padding: 0; }
 
 /* ============ Toolbar (presets + export) ============ */
 .rep-toolbar {
@@ -685,11 +909,12 @@ function periodLabel(p: string): string {
 }
 
 /* ============ Stat grid ============ */
-.rep-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
-.rep-stat-grid.three { grid-template-columns: repeat(3, 1fr); }
-.rep-stat-grid.two { grid-template-columns: repeat(2, 1fr); }
-@media (max-width: 520px) {
-  .rep-stat-grid.three { grid-template-columns: 1fr 1fr; }
+/* KPIs en fila: auto-fit reparte el ancho completo; el nº de tarjetas define
+   las columnas (4 en dashboard ejecutivo, 3 en ventas/inventario, etc.). */
+.rep-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 12px; margin-bottom: 14px;
 }
 .rep-stat {
   background: var(--pure-white);
@@ -729,6 +954,17 @@ function periodLabel(p: string): string {
   box-shadow: var(--shadow-sm);
 }
 .rep-card + .rep-card { margin-top: 12px; }
+
+/* Dashboard ejecutivo: gráfico de barras + top platos lado a lado en desktop.
+   El gráfico toma la columna más ancha; colapsa a 1 columna en <1024px. */
+.rep-dash-split { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.rep-dash-split + .rep-card { margin-top: 12px; }
+@media (min-width: 1024px) {
+  .rep-dash-split { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); align-items: start; }
+  .rep-dash-split > .rep-card + .rep-card { margin-top: 0; }
+  /* Si no hay top platos, el gráfico ocupa todo el ancho. */
+  .rep-dash-split > .rep-card:only-child { grid-column: 1 / -1; }
+}
 .rep-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .rep-card-title {
   font-family: var(--font-serif); font-style: italic; font-weight: 500;
@@ -757,6 +993,11 @@ function periodLabel(p: string): string {
 .rep-bar-col:nth-child(7n+7) .rep-bar { background: var(--terracotta-700); }
 .rep-bar-col:hover .rep-bar { filter: brightness(1.06) saturate(1.1); }
 .rep-bar-lbl { font-size: 10.5px; font-weight: 500; color: var(--fg3); margin-top: 7px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* En desktop el gráfico vive en la columna ancha: más alto y barras más cuerpo. */
+@media (min-width: 1024px) {
+  .rep-chart { height: 176px; }
+  .rep-bar { max-width: 46px; }
+}
 
 /* ============ Dish rows (dashboards) ============ */
 .rep-dish { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 12px; padding: 10px 0; }
@@ -792,7 +1033,7 @@ function periodLabel(p: string): string {
 .rep-pareto-sub { font-size: 11.5px; color: var(--fg3); margin-top: 5px; }
 
 /* ============ Methods (cashier) ============ */
-.rep-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rep-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 20px; }
 .rep-method { display: flex; align-items: center; gap: 9px; }
 .rep-method-dot { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
 .rep-method-k { font-size: 13px; color: var(--fg2); }
@@ -806,6 +1047,8 @@ function periodLabel(p: string): string {
 .rep-table th.left, .rep-table td.left { text-align: left; }
 .rep-table tbody tr { border-bottom: 1px solid var(--border-subtle); }
 .rep-table tbody tr:last-child { border-bottom: none; }
+/* Zebra sutil para el ritmo de lectura; la fila destacada (.low) gana por orden de fuente. */
+.rep-table tbody tr:nth-child(even) { background: var(--crema-50); }
 .rep-table tbody tr.low { background: var(--danger-bg); }
 .rep-table td.name { font-weight: 600; color: var(--fg1); }
 .rep-table td.strong { font-weight: 700; color: var(--fg1); }
@@ -822,7 +1065,66 @@ function periodLabel(p: string): string {
 
 .capitalize { text-transform: capitalize; }
 
+/* ============ Paneles de resumen lateral (.scr-aside) ============ */
+/* Bloques dentro del .scr-panel (método de pago, comprobante, etc.). */
+.rep-aside-block { margin-top: 16px; }
+.rep-aside-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--fg3); margin-bottom: 9px;
+}
+.scr-aside .rep-methods { grid-template-columns: 1fr; gap: 9px; }
+
+/* dt con punto de leyenda + dd con color semántico (alineación dentro del panel). */
+.scr-aside .scr-stat dt { display: inline-flex; align-items: center; gap: 8px; }
+.scr-aside .scr-stat dd.warn { color: var(--mostaza-700); }
+.scr-aside .scr-stat dd.danger { color: var(--danger); }
+
+/* Barra segmentada de distribución (ABC / estado de stock) — un vistazo de la mezcla. */
+.rep-seg-bar { display: flex; gap: 3px; height: 9px; margin: 2px 0 14px; }
+.rep-seg { border-radius: 999px; min-width: 5px; transition: flex-grow var(--dur-slow, 0.4s) var(--ease-emphasis); }
+.rep-seg.s-a { background: var(--terracotta); }
+.rep-seg.s-b { background: var(--mostaza); }
+.rep-seg.s-c { background: var(--espresso-400); }
+.rep-seg.s-ok { background: var(--oliva); }
+.rep-seg.s-low { background: var(--mostaza); }
+.rep-seg.s-crit { background: var(--danger); }
+.rep-seg-dot { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+.rep-seg-dot.s-a { background: var(--terracotta); }
+.rep-seg-dot.s-b { background: var(--mostaza); }
+.rep-seg-dot.s-c { background: var(--espresso-400); }
+.rep-seg-dot.s-ok { background: var(--oliva); }
+.rep-seg-dot.s-low { background: var(--mostaza); }
+.rep-seg-dot.s-crit { background: var(--danger); }
+
+/* Gauge global vs objetivo (food cost). */
+.rep-gauge { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 4px; }
+.rep-gauge-row { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 10px; }
+.rep-gauge-k { font-size: 12px; color: var(--fg2); }
+.rep-gauge-track { height: 8px; border-radius: 999px; background: var(--crema-200); overflow: hidden; }
+.rep-gauge-fill { display: block; height: 100%; border-radius: 999px; transition: width 0.6s var(--ease-emphasis); }
+.rep-gauge-fill.good { background: var(--oliva); }
+.rep-gauge-fill.bad { background: var(--danger); }
+.rep-gauge-fill.target { background: var(--espresso-400); }
+.rep-gauge-v { font-size: 12.5px; font-weight: 700; color: var(--fg1); font-variant-numeric: tabular-nums; }
+
+/* CTA accionable y notas del panel. */
+.rep-aside-cta {
+  display: inline-flex; align-items: center; gap: 7px; margin-top: 16px;
+  font-size: 12.5px; font-weight: 600; color: var(--terracotta-700); text-decoration: none;
+  transition: color var(--dur);
+}
+.rep-aside-cta:hover { color: var(--terracotta); }
+.rep-aside-cta :deep(svg) { width: 14px; height: 14px; }
+.rep-aside-foot { margin: 16px 0 0; font-size: 11.5px; color: var(--fg3); line-height: 1.5; }
+.rep-aside-note {
+  display: flex; align-items: flex-start; gap: 8px; margin: 16px 0 0;
+  padding: 10px 12px; border-radius: 12px; font-size: 12px; line-height: 1.45; font-weight: 500;
+}
+.rep-aside-note.bad { background: var(--terracotta-100); color: var(--terracotta-700); }
+.rep-aside-note.good { background: var(--oliva-100); color: var(--oliva-700); }
+.rep-aside-note :deep(svg) { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+
 @media (prefers-reduced-motion: reduce) {
-  .rep-bar, .rep-dish-fill { transition: none !important; }
+  .rep-bar, .rep-dish-fill, .rep-seg, .rep-gauge-fill { transition: none !important; }
 }
 </style>
