@@ -16,7 +16,7 @@ cp .env.example .env   # genera un NUXT_SESSION_PASSWORD propio (32+ chars)
 npm run dev            # http://localhost:3000
 ```
 
-**Credenciales demo** (password = `NUXT_DEMO_PASSWORD`, por defecto `MotifDemo2026`):
+**Credenciales demo** (`NUXT_DEMO_PASSWORD=<redacted>`; configure the real value only in the provider or local `.env`):
 
 | Email | Rol |
 |---|---|
@@ -45,27 +45,41 @@ El prototipo de referencia (React, 46 pantallas) **no se versiona** (`gastronomi
 
 ## Deploy
 
-### Variables de entorno (obligatorias en producción)
+The production demo frontend targets **Vercel** from the `frontend/` directory. Keep browser and Nuxt client code on `/api/**`; Nitro server handlers stay as the BFF layer and proxy to the Render NestJS backend through `NUXT_API_BASE`.
 
-| Variable | Descripción |
-|---|---|
-| `NUXT_SESSION_PASSWORD` | Secreto de la cookie de sesión sellada (mínimo 32 caracteres aleatorios). **Sin ella el login falla en prod.** |
-| `NUXT_DEMO_PASSWORD` | Password de las cuentas demo |
+### Required Vercel environment names
 
-### Opción recomendada: contenedor Node (Coolify / Railway / Render / Fly)
+Configure names only in code/docs. Add real values through the Vercel dashboard or interactive CLI prompts; do not commit or print secret values.
 
-La demo guarda estado en memoria del proceso, así que necesita **un solo proceso Node de larga vida** para que los flujos (abrir mesa, cobrar, importar) sean consistentes durante toda la sesión de demo.
+| Variable | Purpose | Example value policy |
+|---|---|---|
+| `NUXT_SESSION_PASSWORD` | Sealed session-cookie secret for `nuxt-auth-utils` | 32+ random characters, secret value never committed |
+| `NUXT_DEMO_PASSWORD` | Demo account password | Secret value managed in Vercel |
+| `NUXT_API_BASE` | Render backend base URL consumed by Nitro BFF handlers | Provider URL only, for example the Render backend origin |
+
+### Vercel quick path
+
+Run these from the composite workspace root after reviewing the Vercel project target. The commands name variables but never include their values inline.
+
+```bash
+vercel deploy --dry --cwd frontend
+vercel env add NUXT_SESSION_PASSWORD production --cwd frontend
+vercel env add NUXT_DEMO_PASSWORD production --cwd frontend
+vercel env add NUXT_API_BASE production --cwd frontend
+vercel deploy --prod --cwd frontend
+```
+
+`NUXT_API_BASE` must point to the Render backend that exposes `/api/health` and the NestJS API. The frontend should continue calling local `/api/**` routes so the client does not need to know provider internals.
+
+### Local container option
+
+The older mock-only demo can still run as a single long-lived Node container for local walkthroughs. In the linked provider demo, prefer Vercel + Render + Supabase so the BFF is stateless and deployment checks can verify all services.
 
 ```bash
 docker build -t gastronomia-frontend .
 docker run -p 3000:3000 \
-  -e NUXT_SESSION_PASSWORD="<32+ chars aleatorios>" \
-  -e NUXT_DEMO_PASSWORD="MotifDemo2026" \
+  -e NUXT_SESSION_PASSWORD="<redacted>" \
+  -e NUXT_DEMO_PASSWORD="<redacted>" \
+  -e NUXT_API_BASE="<render-backend-origin>" \
   gastronomia-frontend
 ```
-
-En **Coolify** (ya previsto en la infraestructura del proyecto): nueva app → este repo → build con Dockerfile → definir las 2 variables → deploy. Railway/Render detectan el Dockerfile automáticamente.
-
-### Vercel (con caveat)
-
-Funciona zero-config (preset Nitro), define las mismas variables en el dashboard. **Caveat**: en serverless cada lambda tiene su propia memoria, por lo que el estado del mock puede divergir o reiniciarse entre requests (cada cold start re-siembra los datos). Para mostrar la UI alcanza; para una demo guiada de flujos POS usa la opción de contenedor. Cuando exista la API NestJS este caveat desaparece (el BFF pasa a ser stateless) y Vercel vuelve a ser el destino natural del frontend.
