@@ -125,6 +125,14 @@ async function save(): Promise<void> {
     })
     await navigateTo('/app/inventario')
   }
+  catch (error) {
+    // Stay on the page so the user can correct and retry.
+    toast.add({
+      title: 'Error al registrar movimiento',
+      description: errorMessage(error, 'No se pudo guardar el movimiento'),
+      color: 'error',
+    })
+  }
   finally {
     busy.value = false
   }

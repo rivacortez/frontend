@@ -9,6 +9,10 @@ definePageHeader(() => ({
   subtitle: 'Controlá qué tenés, registrá movimientos y reponé lo que falta',
 }))
 
+const { user } = useUserSession()
+/** True for owner and manager — the only roles allowed to view the shopping list. */
+const canManage = computed(() => user.value?.role === 'owner' || user.value?.role === 'manager')
+
 const { data: ingredients } = useIngredients()
 const { data: shopping } = useShoppingList()
 const toast = useToast()
@@ -128,8 +132,17 @@ async function orderItem(i: Ingredient): Promise<void> {
     toast.add({ title: `${i.name} ya está en la Lista de Compras`, icon: 'i-lucide-info' })
     return
   }
-  await addShopping({ ingredientId: i.id })
-  toast.add({ title: `${i.name} agregado a Lista de Compras`, icon: 'i-lucide-check-circle-2' })
+  try {
+    await addShopping({ ingredientId: i.id })
+    toast.add({ title: `${i.name} agregado a Lista de Compras`, icon: 'i-lucide-check-circle-2' })
+  }
+  catch (error) {
+    toast.add({
+      title: 'No se pudo agregar a la lista',
+      description: errorMessage(error, 'Error al agregar'),
+      color: 'error',
+    })
+  }
 }
 
 /* ===== Carga masiva CSV (HU-02-02) ===== */
@@ -222,7 +235,7 @@ async function onImportFile(e: Event): Promise<void> {
               </button>
             </li>
           </ul>
-          <NuxtLink to="/app/inventario/lista-compras" class="stk-attention-foot">
+          <NuxtLink v-if="canManage" to="/app/inventario/lista-compras" class="stk-attention-foot">
             Ver lista de compras <UIcon name="i-lucide-arrow-right" />
           </NuxtLink>
         </section>
@@ -310,7 +323,7 @@ async function onImportFile(e: Event): Promise<void> {
               <span class="stk-act-label">Ingreso manual</span>
               <span class="stk-act-sub">Sumá o descontá a mano</span>
             </NuxtLink>
-            <NuxtLink to="/app/inventario/lista-compras" class="stk-act">
+            <NuxtLink v-if="canManage" to="/app/inventario/lista-compras" class="stk-act">
               <UIcon name="i-lucide-shopping-cart" class="stk-act-ico" aria-hidden="true" />
               <span class="stk-act-label">Planificar compra</span>
               <span class="stk-act-sub strong">{{ formatPEN(shoppingTotal) }}</span>

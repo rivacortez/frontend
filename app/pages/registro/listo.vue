@@ -1,9 +1,15 @@
 <script setup lang="ts">
+import type { BusinessSettings, DayHours } from '#shared/types/domain'
+
 useSeoMeta({ title: '¡Listo! — GastronomIA' })
 
 const store = useOnboardingStore()
 const { fetch: refreshSession } = useUserSession()
 const toast = useToast()
+
+const updateBusiness = useUpdateSettings('business')
+const updateTax = useUpdateSettings('tax')
+const updateHours = useUpdateSettings('hours')
 
 if (!store.account.email) {
   await navigateTo('/registro')
@@ -11,6 +17,44 @@ if (!store.account.email) {
 
 const registering = ref(false)
 const error = ref(false)
+
+// Orden de la semana que entiende el backend (ver `tenant-settings-adapter`).
+const WEEK_DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'] as const
+
+/**
+ * Vuelca al backend la configuración fiscal/horaria capturada en el wizard, que
+ * antes se recolectaba y se DESCARTABA en silencio (fix E01-3). Best-effort: la
+ * cuenta ya existe, así que un fallo aquí NO bloquea el ingreso — se avisa y el
+ * usuario lo completa en Ajustes.
+ *
+ * De-scope deliberado (sin endpoint propio aún; NO se persiste en silencio):
+ * - zonas y mesas (`setup.areas`) → E03 (gestión de mesas);
+ * - métodos de pago y tipo de cocina → el backend todavía no los modela;
+ * - fuente de importación → flujo aparte en Datos → Importar.
+ */
+async function persistLocalSetup(): Promise<void> {
+  const tasks: Promise<unknown>[] = []
+
+  // Negocio: solo los campos fiscales con dato real (RUC / dirección).
+  const business: Partial<BusinessSettings> = {}
+  if (store.restaurant.ruc.trim()) business.ruc = store.restaurant.ruc.trim()
+  if (store.restaurant.address.trim()) business.address = store.restaurant.address.trim()
+  if (Object.keys(business).length > 0) tasks.push(updateBusiness.mutateAsync(business))
+
+  // IGV.
+  tasks.push(updateTax.mutateAsync({ igvPct: store.setup.igv }))
+
+  // Horario habitual aplicado a cada día no marcado como cerrado.
+  const days: DayHours[] = WEEK_DAYS.map(day => ({
+    day,
+    opens: store.setup.openTime,
+    closes: store.setup.closeTime,
+    closed: store.setup.closedDays.includes(day),
+  }))
+  tasks.push(updateHours.mutateAsync({ days }))
+
+  await Promise.all(tasks)
+}
 
 async function finish(): Promise<void> {
   if (registering.value) return
@@ -30,7 +74,23 @@ async function finish(): Promise<void> {
       store.registered = true
     }
     await refreshSession()
+
+    // Persistir la config del local capturada (best-effort; no bloquea el ingreso).
+    try {
+      await persistLocalSetup()
+    }
+    catch {
+      toast.add({
+        title: 'Tu cuenta está lista, pero no pudimos guardar algunos datos del local. Complétalos en Ajustes.',
+        icon: 'i-lucide-info',
+        color: 'warning',
+      })
+    }
+
     await navigateTo('/app')
+    // Wizard completado: limpiar el progreso persistido (el `$subscribe` del
+    // plugin vuelca el estado por defecto a sessionStorage).
+    store.$reset()
   }
   catch {
     error.value = true

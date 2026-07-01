@@ -8,6 +8,10 @@ definePageHeader(() => ({ title: 'Recetas' }))
 
 const router = useRouter()
 
+// E02-6: staff no puede crear recetas (backend retorna 403); ocultamos el botón.
+const { user } = useUserSession()
+const canWrite = computed(() => user.value?.role !== 'staff')
+
 type FilterId = 'all' | 'low' | 'cat'
 type SortId = 'margin-asc' | 'margin-desc' | 'top-sellers' | 'alpha' | 'recent'
 
@@ -148,7 +152,8 @@ function pickSort(id: SortId): void {
           <UIcon name="i-lucide-x" />
         </button>
       </div>
-      <NuxtLink to="/app/recetas/nueva" class="rcp-new" aria-label="Crear nueva receta">
+      <!-- E02-6: solo owner/manager pueden crear recetas -->
+      <NuxtLink v-if="canWrite" to="/app/recetas/nueva" class="rcp-new" aria-label="Crear nueva receta">
         <UIcon name="i-lucide-plus" /> Nueva
       </NuxtLink>
     </div>
@@ -259,7 +264,7 @@ function pickSort(id: SortId): void {
       </div>
       <h3>Aún no tienes recetas</h3>
       <p>Crea tu primer plato para empezar a calcular márgenes y costos automáticamente.</p>
-      <NuxtLink to="/app/recetas/nueva" class="btn btn-primary">
+      <NuxtLink v-if="canWrite" to="/app/recetas/nueva" class="btn btn-primary">
         <UIcon name="i-lucide-plus" /> Crear receta
       </NuxtLink>
     </div>

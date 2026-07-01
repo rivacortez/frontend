@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RecipeItem } from '#shared/types/domain'
+import type { SuggestPriceView } from '~/server/api/recipes/[id]/suggest-price.get'
 
 definePageMeta({ layout: 'app' })
 
@@ -13,6 +14,12 @@ useSeoMeta({ title: () => `${recipe.value?.name ?? 'Receta'} — GastronomIA` })
 
 const { mutateAsync: updateRecipe, isLoading: updating } = useUpdateRecipe()
 const { mutateAsync: deleteRecipe, isLoading: deleting } = useDeleteRecipe()
+
+/* ===== RBAC (E02-6) ===== */
+// Staff no puede crear/editar/eliminar recetas — el backend retorna 403 en esos casos.
+// El gating de UI evita que staff intente operaciones que siempre fallarán.
+const { user } = useUserSession()
+const canWrite = computed(() => user.value?.role !== 'staff')
 
 /* ===== Derivados de costeo ===== */
 const grossCost = computed(() =>
@@ -40,9 +47,9 @@ function itemQtyLabel(it: RecipeItem): string {
 function itemNet(it: RecipeItem): number {
   return it.cost * (1 + it.wastePct / 100)
 }
-/** Alerta mock alineada a la historia del Home (Limón Sutil +30 %). */
-function itemAlert(it: RecipeItem): string | null {
-  return it.ingredientId === 'ing-01' ? 'Subió 30% esta semana' : null
+/** Sin alerta por ingrediente específico — las alertas de precio las trae el backend. */
+function itemAlert(_it: RecipeItem): string | null {
+  return null
 }
 
 /* ===== Tendencia (mock visual, sin histórico real) ===== */
@@ -89,24 +96,56 @@ const units30d = computed(() => (recipe.value?.soldToday ?? 0) * 28)
 const revenue30d = computed(() => Math.round(units30d.value * (recipe.value?.sellPrice ?? 0)))
 const profit30d = computed(() => Math.round(units30d.value * gain.value))
 
-/* ===== Recomendación IA ===== */
+/* ===== Recomendación IA — precio sugerido real (E02-1) ===== */
+// La condición de visibilidad: plato con margen < 30% y costo registrado.
 const showAi = computed(() =>
   !!recipe.value && isDish.value && recipe.value.marginPct < 30 && recipe.value.cost > 0)
-const suggestedPrice = computed(() => {
-  const cost = recipe.value?.cost ?? 0
-  return Math.round(cost / (1 - 0.26))
-})
+
+// Estado de la llamada al BFF (no usa useQuery para no contaminar el cache de recetas).
+const aiData = ref<SuggestPriceView | null>(null)
+const aiLoading = ref(false)
+const aiError = ref<string | null>(null)
+
+/**
+ * Llama al BFF `/api/recipes/:id/suggest-price` para obtener el precio sugerido real.
+ * Se dispara cuando `showAi` cambia a true (receta cargada con margen bajo).
+ * El parámetro `targetMarginPct=30` es el objetivo estándar del negocio.
+ */
+async function fetchSuggestPrice(id: string): Promise<void> {
+  aiLoading.value = true
+  aiError.value = null
+  aiData.value = null
+  try {
+    const res = await $fetch<{ data: SuggestPriceView }>(`/api/recipes/${id}/suggest-price`, {
+      query: { targetMarginPct: 30, period: 'month' },
+    })
+    aiData.value = res.data
+  }
+  catch (error) {
+    aiError.value = errorMessage(error, 'No se pudo obtener la recomendación de precio')
+  }
+  finally {
+    aiLoading.value = false
+  }
+}
+
+watch(
+  [showAi, recipeId],
+  ([visible, id]) => {
+    if (visible && id) void fetchSuggestPrice(id)
+    else aiData.value = null
+  },
+  { immediate: true },
+)
+
+// Valores derivados del precio sugerido real (strings decimales del backend → número).
+const suggestedPriceNum = computed(() =>
+  aiData.value ? +Number(aiData.value.suggestedPrice).toFixed(2) : 0)
 const suggestedMargin = computed(() => {
-  const p = suggestedPrice.value
+  const p = suggestedPriceNum.value
   const cost = recipe.value?.cost ?? 0
   return p > 0 ? Math.round(((p - cost) / p) * 100) : 0
 })
-const districtAvg = computed(() => Math.round(suggestedPrice.value * 1.175))
-const pctBelow = computed(() =>
-  districtAvg.value > 0 ? Math.round((1 - suggestedPrice.value / districtAvg.value) * 100) : 0)
-
-const hasLimonAlert = computed(() =>
-  isAtRisk.value && (recipe.value?.items.some(it => it.ingredientId === 'ing-01') ?? false))
 
 /* ===== Sheets ===== */
 const showAnalysis = ref(false)
@@ -134,18 +173,27 @@ const canSaveEdit = computed(() => editPriceNum.value > 0 && !updating.value)
 
 async function saveEdit(): Promise<void> {
   if (!recipe.value || !canSaveEdit.value) return
-  await updateRecipe({
-    id: recipe.value.id,
-    sellPrice: +editPriceNum.value.toFixed(2),
-    active: editActive.value,
-  })
-  showEdit.value = false
-  toast.add({ title: 'Receta actualizada', icon: 'i-lucide-check-circle-2' })
+  try {
+    await updateRecipe({
+      id: recipe.value.id,
+      sellPrice: +editPriceNum.value.toFixed(2),
+      active: editActive.value,
+    })
+    showEdit.value = false
+    toast.add({ title: 'Receta actualizada', icon: 'i-lucide-check-circle-2' })
+  }
+  catch (error) {
+    toast.add({
+      title: errorMessage(error, 'No se pudo actualizar la receta'),
+      color: 'error',
+      icon: 'i-lucide-alert-circle',
+    })
+  }
 }
 
 function applySuggestion(): void {
   showAnalysis.value = false
-  openEdit(suggestedPrice.value)
+  openEdit(suggestedPriceNum.value)
 }
 
 /* Eliminar */
@@ -184,7 +232,8 @@ watch(showDelete, (open) => {
       <!-- ============ Header ============ -->
       <UiScreenHeader :title="recipe.name" back="/app/recetas">
         <template #trailing>
-          <button class="rd-edit" aria-label="Editar receta" @click="openEdit()">
+          <!-- E02-6: solo owner/manager ven el botón de edición -->
+          <button v-if="canWrite" class="rd-edit" aria-label="Editar receta" @click="openEdit()">
             <UIcon name="i-lucide-pencil" /> Editar
           </button>
         </template>
@@ -209,6 +258,10 @@ watch(showDelete, (open) => {
             <div v-if="!recipe.active" class="rd-inactive">
               <UIcon name="i-lucide-eye-off" /> Inactivo en la carta
             </div>
+            <!-- E02-4: versión del BOM (HU-02-09) -->
+            <div v-if="recipe.version != null" class="rd-version">
+              <UIcon name="i-lucide-git-commit-horizontal" /> v{{ recipe.version }}
+            </div>
           </div>
           <div class="rd-margin-block">
             <div class="rd-margin-big" :class="bucket">
@@ -230,29 +283,60 @@ watch(showDelete, (open) => {
         </div>
       </section>
 
-      <!-- ============ Recomendación IA ============ -->
+      <!-- ============ Recomendación IA (E02-1: precio real del backend) ============ -->
       <section v-if="showAi" class="rd-ai" aria-label="Recomendación IA">
-        <div class="rd-ai-head">
-          <div class="rd-ai-ico" aria-hidden="true"><UIcon name="i-lucide-bot" /></div>
-          <div>
-            <div class="rd-ai-eyebrow">Recomendación IA</div>
-            <div class="rd-ai-title">
-              Subir precio a S/ {{ suggestedPrice }} recupera margen al {{ suggestedMargin }}%
+        <!-- Cargando -->
+        <template v-if="aiLoading">
+          <div class="rd-ai-head">
+            <div class="rd-ai-ico" aria-hidden="true"><UIcon name="i-lucide-bot" /></div>
+            <div>
+              <div class="rd-ai-eyebrow">Recomendación IA</div>
+              <div class="rd-ai-title rd-ai-loading" aria-busy="true">Calculando precio óptimo…</div>
             </div>
           </div>
-        </div>
-        <p class="rd-ai-text">
-          El nuevo precio mantiene competitividad: aún <b>{{ pctBelow }} % por debajo</b> del promedio
-          del distrito (<span class="pill-money">S/ {{ districtAvg }}</span>) para platos similares.
-        </p>
-        <div class="rd-ai-actions">
-          <button class="btn btn-primary" @click="openEdit(suggestedPrice)">
-            <UIcon name="i-lucide-zap" /> Aplicar sugerencia
-          </button>
-          <button class="btn btn-ghost" @click="showAnalysis = true">
-            <UIcon name="i-lucide-bar-chart-3" /> Ver análisis
-          </button>
-        </div>
+        </template>
+
+        <!-- Error al obtener sugerencia -->
+        <template v-else-if="aiError">
+          <div class="rd-ai-head">
+            <div class="rd-ai-ico" aria-hidden="true"><UIcon name="i-lucide-bot" /></div>
+            <div>
+              <div class="rd-ai-eyebrow">Recomendación IA</div>
+              <div class="rd-ai-title">No se pudo obtener la sugerencia</div>
+            </div>
+          </div>
+          <p class="rd-ai-text">{{ aiError }}</p>
+          <div class="rd-ai-actions">
+            <button class="btn btn-ghost" @click="fetchSuggestPrice(recipeId)">
+              <UIcon name="i-lucide-refresh-cw" /> Reintentar
+            </button>
+          </div>
+        </template>
+
+        <!-- Sugerencia real del backend -->
+        <template v-else-if="aiData">
+          <div class="rd-ai-head">
+            <div class="rd-ai-ico" aria-hidden="true"><UIcon name="i-lucide-bot" /></div>
+            <div>
+              <div class="rd-ai-eyebrow">Recomendación IA</div>
+              <div class="rd-ai-title">
+                Subir precio a S/ {{ fmt(suggestedPriceNum) }} recupera margen al {{ suggestedMargin }}%
+              </div>
+            </div>
+          </div>
+          <p class="rd-ai-text">
+            Con costo total de <b>S/ {{ aiData.fullCost }}</b>, el precio sugerido garantiza
+            un margen objetivo de <b>{{ aiData.targetMarginPct }}%</b>.
+          </p>
+          <div class="rd-ai-actions">
+            <button class="btn btn-primary" @click="openEdit(suggestedPriceNum)">
+              <UIcon name="i-lucide-zap" /> Aplicar sugerencia
+            </button>
+            <button class="btn btn-ghost" @click="showAnalysis = true">
+              <UIcon name="i-lucide-bar-chart-3" /> Ver análisis
+            </button>
+          </div>
+        </template>
       </section>
 
       <!-- ============ Insumos (BOM) ============ -->
@@ -264,7 +348,9 @@ watch(showDelete, (open) => {
               <b>{{ recipe.items.length }} insumos</b> · Costo total con mermas: <b>S/ {{ fmt(recipe.cost) }}</b>
             </div>
           </div>
+          <!-- E02-6: solo owner/manager pueden agregar insumos -->
           <button
+            v-if="canWrite"
             class="rd-add-mini"
             aria-label="Agregar insumo"
             @click="toast.add({ title: 'Edición de insumos — disponible pronto', icon: 'i-lucide-package-search' })"
@@ -396,30 +482,7 @@ watch(showDelete, (open) => {
         </div>
       </section>
 
-      <!-- ============ Alertas relacionadas ============ -->
-      <section v-if="hasLimonAlert" class="rd-section" aria-label="Alertas relacionadas">
-        <div class="rd-section-head">
-          <div class="titlewrap">
-            <div class="rd-section-title">Alertas relacionadas</div>
-            <div class="rd-section-sub">Eventos que afectan este plato</div>
-          </div>
-        </div>
-        <div class="rd-related">
-          <div class="rd-related-ico" aria-hidden="true"><UIcon name="i-lucide-alert-triangle" /></div>
-          <div class="rd-related-body">
-            <div class="rd-related-eyebrow">Precio insumo · Crítico</div>
-            <p class="rd-related-text">
-              El <b>Limón Sutil</b> subió <b>30 %</b> esta semana. Esto explica casi por completo
-              la caída del margen de {{ recipe.name }}.
-            </p>
-            <div class="rd-related-actions">
-              <NuxtLink class="btn btn-dark" to="/app/inventario/lista-compras">
-                <UIcon name="i-lucide-list-checks" /> Ver lista de compras
-              </NuxtLink>
-            </div>
-          </div>
-        </div>
-      </section>
+      <!-- Alertas de insumos: eliminadas (eran mock con 'ing-01' hardcodeado). -->
 
       <!-- ============ Modificadores + disponibilidad (HU-02-11 / HU-02-13) ============ -->
       <section v-if="isDish" class="rd-section" aria-label="Modificadores y disponibilidad">
@@ -429,7 +492,8 @@ watch(showDelete, (open) => {
       <div class="rd-bottom-space" />
 
       <!-- ============ Barra de acciones ============ -->
-      <div class="rd-actions-bar" role="toolbar" aria-label="Acciones de receta">
+      <!-- E02-6: staff ve solo la barra, pero sin controles de escritura -->
+      <div v-if="canWrite" class="rd-actions-bar" role="toolbar" aria-label="Acciones de receta">
         <div class="rd-actions-inner">
           <button class="btn rd-btn-danger" aria-label="Eliminar receta" @click="showDelete = true">
             <UIcon name="i-lucide-trash-2" /> Eliminar
@@ -504,47 +568,43 @@ watch(showDelete, (open) => {
         </template>
       </UiBottomSheet>
 
-      <!-- ============ Sheet: análisis IA ============ -->
-      <UiBottomSheet v-model="showAnalysis" :title="`Análisis: subir precio a S/ ${suggestedPrice}`">
+      <!-- ============ Sheet: análisis IA (E02-1: valores reales del backend) ============ -->
+      <UiBottomSheet
+        v-if="aiData"
+        v-model="showAnalysis"
+        :title="`Análisis: subir precio a S/ ${fmt(suggestedPriceNum)}`"
+      >
         <div class="rd-ai-step">
           <div class="num">1</div>
           <div>
-            <h4>Margen objetivo</h4>
+            <h4>Costo total verificado</h4>
             <p>
-              S/ {{ suggestedPrice }} − S/ {{ fmt(recipe.cost) }} =
-              <span class="stat">S/ {{ fmt(suggestedPrice - recipe.cost) }}</span> de utilidad por plato.
-              Margen pasa de {{ recipe.marginPct }} % a <b>{{ suggestedMargin }} %</b>.
+              El sistema calculó un costo total de
+              <span class="stat">S/ {{ aiData.fullCost }}</span>
+              considerando todos los insumos y mermas del BOM.
             </p>
           </div>
         </div>
         <div class="rd-ai-step">
           <div class="num">2</div>
           <div>
-            <h4>Comparativa de mercado</h4>
+            <h4>Margen objetivo</h4>
             <p>
-              Precio promedio del distrito para platos similares: <span class="stat">S/ {{ districtAvg }}</span>.
-              Tu nuevo precio queda {{ pctBelow }} % por debajo, conservando atractivo.
+              Con un margen objetivo de <b>{{ aiData.targetMarginPct }}%</b>,
+              el precio sugerido es
+              <span class="stat">S/ {{ fmt(suggestedPriceNum) }}</span>.
+              Ganancia por plato:
+              <b>S/ {{ fmt(suggestedPriceNum - recipe.cost) }}</b>.
             </p>
           </div>
         </div>
         <div class="rd-ai-step">
           <div class="num">3</div>
           <div>
-            <h4>Impacto estimado en ventas</h4>
+            <h4>Impacto en margen</h4>
             <p>
-              Elasticidad histórica del plato sugiere caída de <span class="stat">~6 %</span>
-              en unidades. Aún así, la ganancia mensual sube de S/ {{ fmtInt(profit30d) }} a
-              <b>~S/ {{ fmtInt(Math.round(profit30d * 1.2)) }}</b>.
-            </p>
-          </div>
-        </div>
-        <div class="rd-ai-step">
-          <div class="num">4</div>
-          <div>
-            <h4>Riesgo</h4>
-            <p>
-              Bajo. Si el insumo crítico mantiene precio alto 2 semanas más, considera además un
-              sustituto: <b>limón Tahití</b> (-22 % costo).
+              El margen sube de <b>{{ recipe.marginPct }}%</b> actual
+              a <b>{{ suggestedMargin }}%</b> con el nuevo precio.
             </p>
           </div>
         </div>
@@ -687,6 +747,24 @@ watch(showDelete, (open) => {
   border-radius: 999px;
 }
 .rd-inactive .iconify { width: 11px; height: 11px; }
+/* E02-4: versión del BOM */
+.rd-version {
+  margin-top: 6px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 600;
+  color: var(--fg3);
+  background: var(--crema-100);
+  border: 1px solid var(--border-subtle);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.rd-version .iconify { width: 11px; height: 11px; }
+/* E02-1: estado de carga del precio IA */
+.rd-ai-loading {
+  color: var(--fg3);
+  font-style: italic;
+}
 
 .rd-margin-block {
   text-align: right;

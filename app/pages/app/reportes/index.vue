@@ -166,7 +166,10 @@ const foodcostOverCount = computed(() => {
 const wasteTopReason = computed(() => {
   const rows = waste.data.value?.byReason ?? []
   if (!rows.length) return null
-  return rows.reduce((top, r) => (num(r.cost) > num(top.cost) ? r : top), rows[0])
+  // rows[0] is guaranteed defined by the !rows.length guard above; omitting the
+  // initial-value argument avoids the TS18048 "possibly undefined" error on rows[0]
+  // while keeping identical runtime semantics (reduce with no init uses element[0]).
+  return rows.reduce((top, r) => (num(r.cost) > num(top.cost) ? r : top))
 })
 
 /* ============ CSV export (HU-07-10) ============ */

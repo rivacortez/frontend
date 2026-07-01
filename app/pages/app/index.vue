@@ -34,7 +34,11 @@ const canManage = computed(() => isOwner.value || isManager.value)
 const num = (s: string | number | undefined | null): number => Number(s ?? 0)
 
 const admin = useAdminDashboard(() => isOwner.value)
-const manager = useManagerDashboard(() => canManage.value)
+// Gate manager dashboard so it only fires for the manager role. The owner
+// sees the admin dashboard (primary = admin for owner); there is no need to
+// also load the manager data for owner, which would add an extra 403-safe but
+// wasted request on every dashboard load.
+const manager = useManagerDashboard(() => canManage.value && !isOwner.value)
 const cashier = useCashierDashboard(() => !canManage.value)
 const tables = useTables()
 
@@ -103,14 +107,20 @@ const revenueTrend = computed<{ pct: number, up: boolean } | null>(() => {
   return { pct, up: pct >= 0 }
 })
 
-const shortcuts = [
+// Owner/manager-only shortcuts are filtered out for staff so they never see
+// links to pages the backend will 403 on (e.g. the forecast shopping list).
+const shortcuts = computed(() => [
   { icon: 'i-lucide-utensils', label: 'Recetas', sub: 'Costos y márgenes', to: '/app/recetas' },
-  { icon: 'i-lucide-line-chart', label: 'Pronósticos', sub: 'Demanda con IA', to: '/app/reportes' },
+  // "Pronósticos" shortcut links to /app/reportes (the reports hub) until the
+  // dedicated E08 forecasting view ships. Subtitle uses "Ventas y tendencias"
+  // instead of "Demanda con IA" — the reports page is deterministic analytics,
+  // not AI; reserving "IA" labels for the real core-ai capabilities (E08/E09).
+  { icon: 'i-lucide-line-chart', label: 'Pronósticos', sub: 'Ventas y tendencias', to: '/app/reportes' },
   { icon: 'i-lucide-package', label: 'Inventario', sub: 'Stock y mermas', to: '/app/inventario' },
-  { icon: 'i-lucide-scan-line', label: 'Escanear factura', sub: 'Carga con IA', to: '/app/datos/factura-ia' },
-  { icon: 'i-lucide-shopping-cart', label: 'Compras', sub: 'Lista de compra', to: '/app/inventario/lista-compras' },
+  { icon: 'i-lucide-scan-line', label: 'Escanear factura', sub: 'Próximamente', to: '/app/datos/factura-ia' },
+  ...(canManage.value ? [{ icon: 'i-lucide-shopping-cart', label: 'Compras', sub: 'Lista de compra', to: '/app/inventario/lista-compras' }] : []),
   { icon: 'i-lucide-bar-chart-3', label: 'Reportes', sub: 'KPIs y análisis', to: '/app/reportes' },
-]
+])
 </script>
 
 <template>

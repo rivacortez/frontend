@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { changePasswordSchema } from '#shared/schemas/auth'
+import type { NotificationType } from '~/composables/use-notifications'
 
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Perfil — GastronomIA' })
@@ -21,15 +22,32 @@ const initials = computed(() =>
     .join(''),
 )
 
-const prefs = reactive({
-  notifyCritical: true,
-  notifyDaily: true,
-  notifyWeekly: false,
-  sounds: true,
-})
+/* ===== Preferencias de notificación (HU-10-03 · fix E01-1) =====
+ * Antes los switches solo emitían un toast de éxito sin tocar el backend, así
+ * que al recargar volvían al default (toast falso). Ahora derivan del estado
+ * PERSISTIDO (`GET /api/notifications/preferences`) y cada cambio hace
+ * `PATCH /api/notifications/preferences`; el catálogo de tipos es compartido con
+ * la bandeja de notificaciones. Aplica a cualquier rol bajo su propio tenant. */
+const { data: prefRows, isLoading: prefsLoading, error: prefsError } = useNotificationPreferences()
+const setPreference = useSetPreference()
 
-function savePrefs(): void {
-  toast.add({ title: 'Preferencias guardadas', icon: 'i-lucide-check' })
+/**
+ * Persiste el canal in-app de un tipo de notificación. Solo confirma con toast
+ * de éxito en 2xx; si el backend falla, informa el error y el switch revierte
+ * solo, porque su estado deriva de la query (que no cambió ante el fallo).
+ */
+async function savePref(type: NotificationType, value: boolean): Promise<void> {
+  try {
+    await setPreference.mutateAsync({ type, inApp: value })
+    toast.add({ title: 'Preferencia guardada', icon: 'i-lucide-check' })
+  }
+  catch (error) {
+    toast.add({
+      title: errorMessage(error, 'No se pudo guardar la preferencia'),
+      color: 'error',
+      icon: 'i-lucide-alert-circle',
+    })
+  }
 }
 
 async function logout(): Promise<void> {
@@ -132,39 +150,47 @@ async function submitPassword(): Promise<void> {
       </div>
     </section>
 
-    <!-- Preferencias -->
+    <!-- Preferencias de notificación (canal in-app) -->
     <section class="pf-section">
-      <div class="eyebrow pf-eyebrow">Notificaciones</div>
-      <div class="pf-card pf-list">
-        <label class="pf-row toggle">
+      <div class="eyebrow pf-eyebrow">Notificaciones · en la app</div>
+
+      <!-- Loading: esqueleto mientras se cargan las preferencias persistidas -->
+      <div v-if="prefsLoading && !prefRows" class="pf-card pf-list" aria-hidden="true">
+        <div v-for="i in 4" :key="i" class="pf-row toggle">
           <span class="pf-row-body">
-            <span class="pf-row-label">Alertas críticas</span>
-            <span class="pf-row-sub">Margen en riesgo, stock crítico</span>
+            <USkeleton class="pf-sk-label" />
+            <USkeleton class="pf-sk-sub" />
           </span>
-          <USwitch v-model="prefs.notifyCritical" @update:model-value="savePrefs" />
-        </label>
-        <label class="pf-row toggle">
+          <USkeleton class="pf-sk-switch" />
+        </div>
+      </div>
+
+      <!-- Error: no se pudieron cargar las preferencias -->
+      <UAlert
+        v-else-if="prefsError"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-alert-circle"
+        title="No se pudieron cargar tus preferencias"
+        description="Revisa tu conexión e inténtalo de nuevo."
+      />
+
+      <!-- Datos: un switch por tipo, persistido en el backend -->
+      <div v-else class="pf-card pf-list">
+        <label v-for="p in NOTIFICATION_PREFERENCE_TYPES" :key="p.type" class="pf-row toggle">
           <span class="pf-row-body">
-            <span class="pf-row-label">Resumen diario</span>
-            <span class="pf-row-sub">Ventas y ocupación al cierre</span>
+            <span class="pf-row-label">{{ p.label }}</span>
+            <span class="pf-row-sub">{{ p.description }}</span>
           </span>
-          <USwitch v-model="prefs.notifyDaily" @update:model-value="savePrefs" />
-        </label>
-        <label class="pf-row toggle">
-          <span class="pf-row-body">
-            <span class="pf-row-label">Reporte semanal</span>
-            <span class="pf-row-sub">Análisis IA cada lunes</span>
-          </span>
-          <USwitch v-model="prefs.notifyWeekly" @update:model-value="savePrefs" />
-        </label>
-        <label class="pf-row toggle">
-          <span class="pf-row-body">
-            <span class="pf-row-label">Sonidos</span>
-            <span class="pf-row-sub">Al recibir comandas y alertas</span>
-          </span>
-          <USwitch v-model="prefs.sounds" @update:model-value="savePrefs" />
+          <USwitch
+            :model-value="isInAppEnabled(prefRows, p.type)"
+            :disabled="setPreference.isLoading.value"
+            :aria-label="`Notificarme: ${p.label}`"
+            @update:model-value="(v: boolean) => savePref(p.type, v)"
+          />
         </label>
       </div>
+      <p class="pf-prefs-note">El aviso por correo llegará en una próxima versión.</p>
     </section>
 
     <!-- Cuenta -->
@@ -304,6 +330,11 @@ async function submitPassword(): Promise<void> {
   margin: 16px 0 0;
 }
 .heart { color: var(--terracotta); }
+
+.pf-prefs-note { font-size: 11.5px; color: var(--fg3); margin: 8px 4px 0; }
+.pf-sk-label { width: 45%; height: 14px; }
+.pf-sk-sub { width: 70%; height: 11px; margin-top: 4px; }
+.pf-sk-switch { width: 36px; height: 20px; border-radius: 999px; flex-shrink: 0; }
 
 .pf-pwd-form { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 8px; }
 .pf-pwd-error { color: var(--danger); font-size: 12.5px; margin: 2px 0 0; }

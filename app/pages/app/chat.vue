@@ -2,16 +2,20 @@
 import type { ChatMessage } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
-useSeoMeta({ title: 'Chat analítico — GastronomIA' })
+useSeoMeta({ title: 'Chat IA — GastronomIA' })
 
 const { user } = useUserSession()
 const toast = useToast()
-const { messages, streaming, ask, stop } = useChatStream()
+const { messages, loading, ask, clearMessages } = useChatQuery()
 
 const firstName = computed(() => user.value?.name?.split(' ')[0] ?? '')
 
-// El topbar muestra el título estable del shell; el saludo editorial vive en el
-// empty-state del cuerpo (evita duplicar el mismo texto en ambos lugares).
+// Staff cannot use Chat IA — the backend enforces CASL (403). Gate the UI
+// defensively so staff never fires a request that will unconditionally fail.
+const canChat = computed(
+  () => user.value?.role === 'owner' || user.value?.role === 'manager',
+)
+
 definePageHeader(() => ({
   title: 'Chat IA',
   subtitle: 'Lenguaje natural → SQL',
@@ -22,13 +26,16 @@ interface QueryCategory {
   label: string
   questions: string[]
 }
+
+// These questions are validated against the backend's analytics tables
+// (sales_history, inventory, recipes) and reliably produce structured results.
 const CATEGORIES: QueryCategory[] = [
   {
     label: 'Ventas',
     questions: [
-      '¿Cuánto vendí hoy?',
+      '¿Cuáles son mis platos más vendidos?',
+      '¿Cuánto vendí esta semana?',
       '¿Cuál es mi ticket promedio?',
-      '¿Cuál fue mi plato más vendido esta semana?',
     ],
   },
   {
@@ -42,15 +49,15 @@ const CATEGORIES: QueryCategory[] = [
   {
     label: 'Márgenes y costos',
     questions: [
-      '¿Cuál es mi margen real?',
       '¿Cuál es mi plato más rentable?',
       '¿Qué platos tienen food cost alto?',
+      '¿Cuál es mi margen real?',
     ],
   },
   {
     label: 'Tendencias',
     questions: [
-      '¿Cómo va la semana vs la anterior?',
+      '¿Cómo van las ventas de este mes?',
       'Comparame este mes con el anterior',
       '¿Qué día de la semana vendo más?',
     ],
@@ -71,20 +78,21 @@ watch(text, () => {
 
 function send(): void {
   const question = text.value.trim()
-  if (!question || streaming.value) return
+  if (!question || loading.value) return
   text.value = ''
   ask(question)
 }
 
-// ===== Auto-scroll en cada chunk =====
-watch(messages, () => {
+// Auto-scroll on each new message and on loading state change (to reveal the
+// typing indicator as soon as it appears in the thread).
+watch([messages, loading], () => {
   if (!import.meta.client) return
   requestAnimationFrame(() => {
     window.scrollTo({ top: document.documentElement.scrollHeight })
   })
 }, { deep: true, flush: 'post' })
 
-// ===== Render de **bold** sin librerías =====
+// ===== Render **bold** inline without a markdown library =====
 interface TextSegment { text: string, bold: boolean }
 function boldSegments(content: string): TextSegment[] {
   return content
@@ -93,23 +101,22 @@ function boldSegments(content: string): TextSegment[] {
     .filter(segment => segment.text.length > 0)
 }
 
-// ===== Bloque SQL colapsable =====
+// ===== SQL collapsible (collapsed by default: keeps the thread scannable) =====
 const collapsedSql = reactive<Record<string, boolean>>({})
 function toggleSql(id: string): void {
   collapsedSql[id] = !collapsedSql[id]
 }
-function showTyping(message: ChatMessage, index: number): boolean {
-  return message.role === 'assistant'
-    && streaming.value
-    && index === messages.value.length - 1
-    && !message.content
+
+// ===== Provider badge label — "provider · model" =====
+function providerLabel(m: ChatMessage): string {
+  if (!m.provider) return ''
+  return m.model ? `${m.provider} · ${m.model}` : m.provider
 }
 
-// ===== Opciones =====
+// ===== Clear conversation =====
 const confirmClearOpen = ref(false)
 function confirmClear(): void {
-  stop()
-  messages.value = []
+  clearMessages()
   text.value = ''
   confirmClearOpen.value = false
   toast.add({ title: 'Conversación limpiada', icon: 'i-lucide-trash-2' })
@@ -117,9 +124,22 @@ function confirmClear(): void {
 </script>
 
 <template>
-  <div class="chat" :class="{ 'is-empty': messages.length === 0 }">
+  <!-- ============ Acceso restringido (staff) ============ -->
+  <div v-if="!canChat" class="access-gate">
+    <div class="access-inner">
+      <UIcon name="i-lucide-lock" class="access-icon" aria-hidden="true" />
+      <p class="access-title">Acceso restringido</p>
+      <p class="access-body">
+        El Chat IA está disponible para gerentes y propietarios.
+        Contactá a tu administrador si necesitás acceso.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ Chat principal (owner / manager) ============ -->
+  <div v-else class="chat" :class="{ 'is-empty': messages.length === 0 && !loading }">
     <!-- ============ Estado inicial: consola de consultas ============ -->
-    <section v-if="messages.length === 0" class="intro">
+    <section v-if="messages.length === 0 && !loading" class="intro">
       <div class="intro-top">
         <div>
           <p class="eyebrow">Chat analítico · lenguaje natural → SQL</p>
@@ -149,7 +169,7 @@ function confirmClear(): void {
     </section>
 
     <!-- ============ Conversación ============ -->
-    <div v-else class="thread" aria-live="polite">
+    <div v-else class="thread" aria-live="polite" aria-label="Conversación con GastronomIA">
       <div class="thread-bar">
         <span class="thread-title">Conversación</span>
         <button type="button" class="thread-clear" @click="confirmClearOpen = true">
@@ -165,35 +185,48 @@ function confirmClear(): void {
       >
         <span class="msg-tag">{{ m.role === 'user' ? 'Vos' : 'GastronomIA' }}</span>
         <div class="bubble">
-          <!-- SQL generado (colapsable) -->
+          <!-- SQL generado (colapsable; cerrado por defecto) -->
           <div v-if="m.sql" class="sql">
             <button
               type="button"
               class="sql-head"
               :aria-expanded="!collapsedSql[m.id]"
+              :aria-controls="`sql-body-${m.id}`"
               @click="toggleSql(m.id)"
             >
-              <UIcon name="i-lucide-database" /> SQL generado
-              <UIcon name="i-lucide-chevron-down" class="sql-chev" :class="{ open: !collapsedSql[m.id] }" />
+              <UIcon name="i-lucide-database" aria-hidden="true" /> Ver consulta SQL
+              <UIcon
+                name="i-lucide-chevron-down"
+                class="sql-chev"
+                :class="{ open: !collapsedSql[m.id] }"
+                aria-hidden="true"
+              />
             </button>
-            <pre v-show="!collapsedSql[m.id]" class="sql-code">{{ m.sql }}</pre>
+            <pre
+              :id="`sql-body-${m.id}`"
+              v-show="!collapsedSql[m.id]"
+              class="sql-code"
+              tabindex="-1"
+            >{{ m.sql }}</pre>
           </div>
 
           <!-- Tabla de resultados -->
-          <div v-if="m.table" class="result-wrap">
+          <div v-if="m.table" class="result-wrap" role="region" :aria-label="`Resultados de la consulta ${index + 1}`">
             <table class="result-table">
               <thead>
-                <tr><th v-for="col in m.table.columns" :key="col">{{ col }}</th></tr>
+                <tr>
+                  <th v-for="col in m.table.columns" :key="col" scope="col">{{ col }}</th>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="(row, ri) in m.table.rows" :key="ri">
-                  <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+                  <td v-for="(cell, ci) in row" :key="ci">{{ cell ?? '' }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <!-- Respuesta -->
+          <!-- Respuesta en lenguaje natural -->
           <p v-if="m.content" class="bubble-text">
             <template v-for="(seg, si) in boldSegments(m.content)" :key="si">
               <b v-if="seg.bold">{{ seg.text }}</b>
@@ -201,7 +234,19 @@ function confirmClear(): void {
             </template>
           </p>
 
-          <div v-if="showTyping(m, index)" class="typing" aria-label="Escribiendo">
+          <!-- Badge de proveedor: transparencia sobre qué modelo respondió -->
+          <p v-if="m.provider" class="provider-badge">
+            <UIcon name="i-lucide-cpu" class="provider-icon" aria-hidden="true" />
+            {{ providerLabel(m) }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Indicador de "escribiendo" mientras espera la respuesta del backend -->
+      <div v-if="loading" class="msg ai" aria-label="GastronomIA está procesando la consulta">
+        <span class="msg-tag" aria-hidden="true">GastronomIA</span>
+        <div class="bubble">
+          <div class="typing" aria-label="Procesando consulta">
             <span /><span /><span />
           </div>
         </div>
@@ -218,30 +263,24 @@ function confirmClear(): void {
           placeholder="Preguntá sobre tu negocio…"
           rows="1"
           aria-label="Escribe tu pregunta"
+          :disabled="loading"
           @keydown.enter.exact.prevent="send"
         />
         <button
-          v-if="streaming"
-          type="button"
-          class="composer-send stop"
-          aria-label="Detener respuesta"
-          @click="stop"
-        >
-          <UIcon name="i-lucide-square" />
-        </button>
-        <button
-          v-else
           type="button"
           class="composer-send"
-          :class="{ active: hasText }"
-          :disabled="!hasText"
+          :class="{ active: hasText && !loading }"
+          :disabled="!hasText || loading"
           aria-label="Enviar pregunta"
           @click="send"
         >
-          <UIcon name="i-lucide-arrow-up" />
+          <UIcon
+            :name="loading ? 'i-lucide-loader-2' : 'i-lucide-arrow-up'"
+            :class="{ spin: loading }"
+          />
         </button>
       </div>
-      <p class="composer-hint">Las respuestas se calculan sobre tus datos en tiempo real.</p>
+      <p class="composer-hint">Las respuestas se calculan sobre tus datos en tiempo real · IA</p>
     </div>
 
     <!-- Confirmación limpiar -->
@@ -258,6 +297,39 @@ function confirmClear(): void {
 </template>
 
 <style scoped>
+/* ============ Acceso restringido ============ */
+.access-gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60dvh;
+  padding: 40px 24px;
+}
+.access-inner {
+  max-width: 380px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.access-icon {
+  width: 40px; height: 40px;
+  color: var(--fg3);
+}
+.access-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--fg1);
+  margin: 0;
+}
+.access-body {
+  font-size: 14px;
+  color: var(--fg2);
+  line-height: 1.55;
+  margin: 0;
+}
+
 .chat {
   width: 100%;
   min-height: 100dvh;
@@ -385,6 +457,7 @@ function confirmClear(): void {
   background: transparent; border: none; color: var(--crema-200); font-family: inherit;
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
 }
+.sql-head:focus-visible { outline: 2px solid var(--terracotta-300); outline-offset: -2px; }
 .sql-head .iconify { width: 13px; height: 13px; }
 .sql-chev { margin-left: auto; transition: transform var(--dur); }
 .sql-chev.open { transform: rotate(180deg); }
@@ -402,6 +475,14 @@ function confirmClear(): void {
 }
 .result-table td { padding: 8px 11px; border-top: 1px solid var(--border-subtle); color: var(--fg1); white-space: nowrap; }
 .result-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
+
+/* Provider badge — one line, muted, non-decorative */
+.provider-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin: 8px 0 0;
+  font-size: 10.5px; color: var(--fg3); letter-spacing: 0.04em;
+}
+.provider-icon { width: 11px; height: 11px; flex-shrink: 0; }
 
 /* Typing */
 .typing { display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; }
@@ -436,6 +517,7 @@ function confirmClear(): void {
   font-family: inherit; font-size: 15px; color: var(--fg1);
   padding: 7px 0; resize: none; max-height: 120px; line-height: 1.45;
 }
+.composer-input:disabled { opacity: 0.6; cursor: not-allowed; }
 .composer-input::placeholder { color: var(--fg3); }
 .composer-send {
   width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
@@ -445,9 +527,15 @@ function confirmClear(): void {
 }
 .composer-send.active { background: var(--terracotta); color: var(--crema-100); }
 .composer-send.active:hover { background: var(--terracotta-700); }
-.composer-send.stop { background: var(--espresso-800); color: var(--crema-100); }
-.composer-send:active { transform: scale(0.94); }
+.composer-send:disabled { opacity: 0.55; cursor: not-allowed; }
+.composer-send:not(:disabled):active { transform: scale(0.94); }
 .composer-send .iconify { width: 17px; height: 17px; }
+
+/* Spin animation for the loading state in the send button */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.7s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
 .composer-hint {
   max-width: 820px; margin: 7px auto 0; padding: 0 4px;
   font-size: 11px; color: var(--fg3); text-align: center;

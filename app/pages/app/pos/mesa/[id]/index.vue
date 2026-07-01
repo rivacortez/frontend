@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DiningTable, Order, OrderItem } from '#shared/types/domain'
+import type { DiningTable, Order, OrderItem, OrderSuggestionView } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
 
@@ -44,6 +44,9 @@ const adjustItem = ref<OrderItem | null>(null)
 const justSent = ref(false)
 
 const { data: recipes } = useRecipes()
+// Widget D: sales-based upsell suggestions (NOT IA — top-sellers not in this order).
+// Reactive to the order ID: re-fetches when the order changes or items are added.
+const { data: suggestions } = useOrderSuggestions(computed(() => order.value?.id))
 
 const cartTotal = computed(() => cart.value.reduce((s, l) => s + l.qty * l.unitPrice, 0))
 const liveTotals = computed(() => orderTotals(order.value))
@@ -86,22 +89,49 @@ function cartDec(line: CartLine): void {
   }
 }
 
+// ===== Upsell: agregar sugerencia al carrito (Widget D) =====
+/**
+ * Adds a sales-based suggestion directly to the local cart (same flow as the
+ * catalog picker). Uses the BFF-resolved `recipeId` and the backend price so no
+ * extra lookup is needed. Increments quantity if the item is already in the cart.
+ */
+function addSuggestionToCart(s: OrderSuggestionView): void {
+  const existing = cart.value.find(l => l.recipeId === s.recipeId)
+  if (existing) {
+    existing.qty += 1
+  }
+  else {
+    cart.value.push({ recipeId: s.recipeId, name: s.name, qty: 1, unitPrice: s.price })
+  }
+}
+
 // ===== Enviar a cocina (HU-03-06) =====
 async function sendToKitchen(): Promise<void> {
   if (!hasPending.value || !order.value) return
   const count = cart.value.length
-  // 1) Persistir los ítems del carrito en la orden (quedan `pending`).
-  await addItems.mutateAsync({
-    orderId: order.value.id,
-    items: cart.value.map(l => ({ recipeId: l.recipeId, qty: l.qty })),
-  })
-  // 2) Enviar la comanda a cocina: el backend rutea los pending a sus estaciones.
-  await sendKitchen.mutateAsync({ orderId: order.value.id })
-  cart.value = []
-  justSent.value = true
-  setTimeout(() => { justSent.value = false }, 700)
-  await refresh()
-  toast.add({ title: `${count === 1 ? '1 item enviado' : `${count} items enviados`} a cocina`, icon: 'i-lucide-send' })
+  try {
+    // 1) Persistir los ítems del carrito en la orden (quedan `pending`).
+    await addItems.mutateAsync({
+      orderId: order.value.id,
+      items: cart.value.map(l => ({ recipeId: l.recipeId, qty: l.qty })),
+    })
+    // 2) Enviar la comanda a cocina: el backend rutea los pending a sus estaciones.
+    await sendKitchen.mutateAsync({ orderId: order.value.id })
+    // Clear cart only on success — do NOT wipe it if the request fails so the
+    // user can retry without re-adding items.
+    cart.value = []
+    justSent.value = true
+    setTimeout(() => { justSent.value = false }, 700)
+    await refresh()
+    toast.add({ title: `${count === 1 ? '1 item enviado' : `${count} items enviados`} a cocina`, icon: 'i-lucide-send' })
+  }
+  catch (e) {
+    toast.add({
+      title: errorMessage(e, 'No se pudo enviar a cocina'),
+      icon: 'i-lucide-circle-alert',
+      color: 'error',
+    })
+  }
 }
 
 // ===== Back con confirmación =====
@@ -127,13 +157,22 @@ function confirmDiscard(): void {
 // ===== Opciones de item en curso =====
 async function markServed(): Promise<void> {
   if (!itemSheet.value || !order.value) return
-  await patchOrder.mutateAsync({
-    orderId: order.value.id,
-    itemUpdates: [{ id: itemSheet.value.id, status: 'served' }],
-  })
-  toast.add({ title: `${itemSheet.value.name} marcado como servido`, icon: 'i-lucide-check-circle-2' })
-  itemSheet.value = null
-  await refresh()
+  try {
+    await patchOrder.mutateAsync({
+      orderId: order.value.id,
+      itemUpdates: [{ id: itemSheet.value.id, status: 'served' }],
+    })
+    toast.add({ title: `${itemSheet.value.name} marcado como servido`, icon: 'i-lucide-check-circle-2' })
+    itemSheet.value = null
+    await refresh()
+  }
+  catch (e) {
+    toast.add({
+      title: errorMessage(e, 'No se pudo marcar como servido'),
+      icon: 'i-lucide-circle-alert',
+      color: 'error',
+    })
+  }
 }
 function openAdjust(): void {
   adjustItem.value = itemSheet.value
@@ -141,13 +180,22 @@ function openAdjust(): void {
 }
 async function removeLive(): Promise<void> {
   if (!itemSheet.value || !order.value) return
-  await patchOrder.mutateAsync({
-    orderId: order.value.id,
-    itemUpdates: [{ id: itemSheet.value.id, remove: true }],
-  })
-  toast.add({ title: `${itemSheet.value.name} eliminado`, icon: 'i-lucide-trash-2' })
-  itemSheet.value = null
-  await refresh()
+  try {
+    await patchOrder.mutateAsync({
+      orderId: order.value.id,
+      itemUpdates: [{ id: itemSheet.value.id, remove: true }],
+    })
+    toast.add({ title: `${itemSheet.value.name} eliminado`, icon: 'i-lucide-trash-2' })
+    itemSheet.value = null
+    await refresh()
+  }
+  catch (e) {
+    toast.add({
+      title: errorMessage(e, 'No se pudo eliminar el ítem'),
+      icon: 'i-lucide-circle-alert',
+      color: 'error',
+    })
+  }
 }
 
 // Snapshot de la orden+mesa al abrir el cobro: el sheet de éxito debe sobrevivir a
@@ -275,20 +323,35 @@ function onPaid(serie: string, number: number): void {
         />
       </section>
 
-      <!-- IA banner -->
-      <section class="md-ai" aria-label="Sugerencia IA">
-        <div class="md-ai-ico"><UIcon name="i-lucide-bot" /></div>
-        <div class="md-ai-body">
-          <div class="md-ai-eyebrow">IA sugiere</div>
-          <div class="md-ai-text">
-            Ofrece <b>Maracuyá Sour</b> de bajada. <b>67 %</b> de mesas similares lo piden a esta hora.
-          </div>
-          <div class="md-ai-actions">
-            <button class="btn btn-ghost" @click="onCatalogConfirm([{ recipeId: 'rec-maracuya-sour', qty: 1 }])">
-              <UIcon name="i-lucide-plus" /> Agregar al pedido
-            </button>
-          </div>
+      <!-- Widget D: sales-based suggestions — top sellers not already in this order.
+           NOT IA: this is historical top-seller analytics, honestly labeled. -->
+      <section
+        v-if="suggestions && suggestions.length > 0"
+        class="md-suggestions"
+        aria-label="Sugerencias para la mesa"
+      >
+        <div class="md-section-head">
+          <span class="lab"><UIcon name="i-lucide-trending-up" /> Los más pedidos</span>
         </div>
+        <div class="md-items">
+          <button
+            v-for="s in suggestions"
+            :key="s.menuItemId"
+            class="md-item md-suggestion-item"
+            :aria-label="`Agregar ${s.name} al pedido, ${formatPEN(s.price)}`"
+            @click="addSuggestionToCart(s)"
+          >
+            <div class="md-item-main">
+              <div class="md-item-name">{{ s.name }}</div>
+              <div class="md-sug-hint">{{ s.timesSold }} vendidos últimamente</div>
+            </div>
+            <div class="md-sug-right">
+              <span class="md-sug-price">{{ formatPEN(s.price) }}</span>
+              <UIcon name="i-lucide-plus-circle" class="md-sug-add" aria-hidden="true" />
+            </div>
+          </button>
+        </div>
+        <div class="md-sug-foot">Sugerencias basadas en ventas históricas</div>
       </section>
 
       <div style="height: 90px" />
@@ -598,32 +661,43 @@ function onPaid(serie: string, number: number): void {
 }
 .md-item.just-sent { animation: itemFadeUp 320ms var(--ease-emphasis); }
 
-.md-ai {
-  margin: 0 16px 16px;
-  padding: 14px;
-  background: linear-gradient(140deg, #EAF1F4 0%, #F2EDE4 100%);
-  border: 1px dashed rgba(74, 107, 123, 0.35);
-  border-radius: 14px;
-  display: flex; gap: 12px;
-  align-items: flex-start;
+/* ===== Widget D — Sugerencias para la mesa ===== */
+.md-suggestions {
+  padding: 0 16px;
+  margin-bottom: 16px;
 }
-.md-ai-ico {
-  width: 32px; height: 32px; border-radius: 10px;
-  background: var(--info); color: var(--crema-100);
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
+/* Suggestion items reuse .md-items + .md-item but override grid for 2-col layout. */
+.md-suggestion-item {
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "main right";
+  cursor: pointer;
+  width: 100%;
+  border-radius: 0;
+  border-left: none; border-right: none; border-top: none;
 }
-.md-ai-ico .iconify { width: 16px; height: 16px; }
-.md-ai-body { flex: 1; min-width: 0; }
-.md-ai-eyebrow {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--info);
-  margin-bottom: 3px;
+.md-suggestion-item .md-item-main { grid-area: main; }
+.md-sug-hint {
+  font-size: 11.5px; color: var(--fg3); margin-top: 2px;
 }
-.md-ai-text { font-size: 13px; line-height: 1.45; color: var(--fg2); }
-.md-ai-text b { color: var(--fg1); font-weight: 600; }
-.md-ai-actions { margin-top: 8px; }
-.md-ai .btn { font-size: 12px; min-height: 32px; padding: 6px 12px; }
+.md-sug-right {
+  grid-area: right;
+  display: flex; align-items: center; gap: 8px;
+  align-self: center;
+}
+.md-sug-price {
+  font-family: var(--font-mono);
+  font-size: 13.5px; font-weight: 600; color: var(--fg1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.md-sug-add {
+  width: 20px; height: 20px; color: var(--oliva-700);
+}
+.md-sug-foot {
+  font-size: 11px; color: var(--fg3);
+  padding: 6px 4px 0;
+  font-style: italic;
+}
 
 .md-actions {
   position: fixed; left: 0; right: 0;

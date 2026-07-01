@@ -18,20 +18,20 @@ npm run dev            # http://localhost:3000
 
 **Credenciales demo** (password = `NUXT_DEMO_PASSWORD`, por defecto `MotifDemo2026`):
 
-| Email | Rol |
-|---|---|
-| `maria@motif.pe` | owner (todo) |
+| Email             | Rol                             |
+| ----------------- | ------------------------------- |
+| `maria@motif.pe`  | owner (todo)                    |
 | `carlos@motif.pe` | manager (settings solo lectura) |
-| `staff@motif.pe` | staff |
+| `staff@motif.pe`  | staff                           |
 
 ## Scripts
 
-| Comando | Qué hace |
-|---|---|
-| `npm run dev` | Dev server con HMR |
-| `npm run build` | Build de producción (Nitro) |
-| `npm run preview` | Sirve el build localmente |
-| `npx nuxt typecheck` | TypeScript estricto (cero `any`) |
+| Comando               | Qué hace                                                                                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`         | Dev server con HMR                                                                                                                                                                          |
+| `npm run build`       | Build de producción (Nitro)                                                                                                                                                                 |
+| `npm run preview`     | Sirve el build localmente                                                                                                                                                                   |
+| `npx nuxt typecheck`  | TypeScript estricto (cero `any`)                                                                                                                                                            |
 | `npm run test:visual` | **Tests visuales**: recorre todas las rutas con sesión demo (iPhone + desktop) y guarda capturas en `tests/visual/shots/` (requiere dev server corriendo y Chromium de Playwright en caché) |
 
 ## Arquitectura de la demo (fake API)
@@ -47,10 +47,11 @@ El prototipo de referencia (React, 46 pantallas) **no se versiona** (`gastronomi
 
 ### Variables de entorno (obligatorias en producción)
 
-| Variable | Descripción |
-|---|---|
+| Variable                | Descripción                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `NUXT_SESSION_PASSWORD` | Secreto de la cookie de sesión sellada (mínimo 32 caracteres aleatorios). **Sin ella el login falla en prod.** |
-| `NUXT_DEMO_PASSWORD` | Password de las cuentas demo |
+| `NUXT_DEMO_PASSWORD`    | Password de las cuentas demo                                                                                   |
+| `NUXT_API_BASE`         | URL base del Render backend (NestJS). Requerida cuando el BFF de Nitro opera en modo proxy hacia la API real.  |
 
 ### Opción recomendada: contenedor Node (Coolify / Railway / Render / Fly)
 
@@ -59,8 +60,8 @@ La demo guarda estado en memoria del proceso, así que necesita **un solo proces
 ```bash
 docker build -t gastronomia-frontend .
 docker run -p 3000:3000 \
-  -e NUXT_SESSION_PASSWORD="<32+ chars aleatorios>" \
-  -e NUXT_DEMO_PASSWORD="MotifDemo2026" \
+  -e NUXT_SESSION_PASSWORD="<redacted>" \
+  -e NUXT_DEMO_PASSWORD="<redacted>" \
   gastronomia-frontend
 ```
 
@@ -69,3 +70,17 @@ En **Coolify** (ya previsto en la infraestructura del proyecto): nueva app → e
 ### Vercel (con caveat)
 
 Funciona zero-config (preset Nitro), define las mismas variables en el dashboard. **Caveat**: en serverless cada lambda tiene su propia memoria, por lo que el estado del mock puede divergir o reiniciarse entre requests (cada cold start re-siembra los datos). Para mostrar la UI alcanza; para una demo guiada de flujos POS usa la opción de contenedor. Cuando exista la API NestJS este caveat desaparece (el BFF pasa a ser stateless) y Vercel vuelve a ser el destino natural del frontend.
+
+### Vercel + Render backend (integración real)
+
+Cuando el Render backend (NestJS) esté desplegado, configurar `NUXT_API_BASE` apuntando a su URL antes del deploy:
+
+```bash
+# Verificar el build antes de publicar
+vercel deploy --dry --cwd frontend
+
+# Registrar la variable de producción (apunta al Render backend)
+vercel env add NUXT_API_BASE production --cwd frontend
+```
+
+El BFF de Nitro reemplaza los handlers de `server/api/**` por proxies hacia `NUXT_API_BASE`, manteniendo el contrato `ApiResponse<T>` — el cliente no cambia.

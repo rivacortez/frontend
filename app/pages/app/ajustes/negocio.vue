@@ -5,8 +5,7 @@ definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Negocio — GastronomIA' })
 
 const { data: settings } = useAppSettings()
-const update = useUpdateSettings('business')
-const toast = useToast()
+const { save: persist, saving } = useSettingsSave('business', 'Cambios guardados')
 const { user } = useUserSession()
 
 const readonly = computed(() => user.value?.role !== 'owner')
@@ -19,18 +18,11 @@ watch(settings, (s) => {
   if (s) Object.assign(form, s.business)
 }, { immediate: true })
 
-const saving = ref(false)
-
+// `useSettingsSave` confirma en 2xx y muestra el error en 4xx/5xx (fix E01-2),
+// dejando el botón habilitado para reintentar.
 async function save(): Promise<void> {
-  if (readonly.value || saving.value) return
-  saving.value = true
-  try {
-    await update.mutateAsync({ ...form })
-    toast.add({ title: 'Cambios guardados', icon: 'i-lucide-check' })
-  }
-  finally {
-    saving.value = false
-  }
+  if (readonly.value) return
+  await persist({ ...form })
 }
 </script>
 

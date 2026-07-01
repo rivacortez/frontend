@@ -1,8 +1,13 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'app' })
+import type { ForecastShoppingItem } from '#shared/types/domain'
+
+definePageMeta({ layout: 'app', middleware: 'require-manager' })
 useSeoMeta({ title: 'Lista de Compras — GastronomIA' })
 
-const { data: items, refresh } = useShoppingList()
+// Widget A: the shopping list is now seeded from the demand forecast (E08 / core-ai)
+// instead of from stock alerts. `needsForecast` must be surfaced as an explicit empty
+// state — never silently show zero items as "nothing to buy".
+const { suggestions, refresh, horizon, needsForecast } = useForecastShoppingSuggestions()
 const patchItem = usePatchShoppingItem()
 const createMovement = useCreateMovement()
 const clearPurchased = useClearPurchased()
@@ -11,12 +16,12 @@ const toast = useToast()
 const expanded = ref<string | null>(null)
 const registering = ref(false)
 
-const list = computed(() => items.value ?? [])
+const list = computed(() => suggestions.value)
 const pending = computed(() => list.value.filter(i => !i.checked))
 const checked = computed(() => list.value.filter(i => i.checked))
 const total = computed(() => pending.value.reduce((s, i) => s + i.estimatedCost, 0))
 const urgentCount = computed(() => pending.value.filter(i => i.urgent).length)
-const aiSavings = computed(() => +(total.value * 0.08).toFixed(0))
+// NOTE: AI savings estimate de-scoped (requires supplier price comparison E05-b).
 
 const dateLabel = computed(() => {
   const label = new Intl.DateTimeFormat('es-PE', {
@@ -37,22 +42,47 @@ async function registerPurchases(): Promise<void> {
   registering.value = true
   try {
     const purchased = [...checked.value]
+    const failedNames: string[] = []
+    const succeededIds: string[] = []
+
+    // Process each item individually so a single failure does not abort the whole batch.
     for (const item of purchased) {
-      await createMovement.mutateAsync({
-        ingredientId: item.ingredientId,
-        type: 'purchase',
-        qty: item.suggestedQty,
-        note: 'Compra desde lista',
+      try {
+        await createMovement.mutateAsync({
+          ingredientId: item.ingredientId,
+          type: 'purchase',
+          qty: item.suggestedQty,
+          note: 'Compra desde lista',
+        })
+        succeededIds.push(item.ingredientId)
+      }
+      catch {
+        failedNames.push(item.name)
+      }
+    }
+
+    if (succeededIds.length > 0) {
+      // La lista no se persiste: limpiamos el estado local de los ítems procesados.
+      clearPurchased(succeededIds)
+      const n = succeededIds.length
+      toast.add({
+        title: `${n} compra${n > 1 ? 's' : ''} registrada${n > 1 ? 's' : ''} en inventario`,
+        icon: 'i-lucide-check-circle-2',
+      })
+      await refresh()
+    }
+
+    if (failedNames.length > 0) {
+      toast.add({
+        title: 'Algunos ítems no se pudieron registrar',
+        description: failedNames.join(', '),
+        color: 'warning',
       })
     }
-    // La lista no se persiste: limpiamos el estado local de lo comprado.
-    clearPurchased(purchased.map(i => i.ingredientId))
-    toast.add({
-      title: `${purchased.length} compra${purchased.length > 1 ? 's' : ''} registrada${purchased.length > 1 ? 's' : ''} en inventario`,
-      icon: 'i-lucide-check-circle-2',
-    })
-    await refresh()
-    await navigateTo('/app/inventario')
+    else {
+      // All items succeeded — leave the screen.
+      await navigateTo('/app/inventario')
+    }
   }
   finally {
     registering.value = false
@@ -99,14 +129,10 @@ function share(): void {
           <div class="lbl">Urgentes</div>
           <div class="val urgent">{{ urgentCount }}</div>
         </div>
-        <div class="sl-sum-cell savings">
-          <div class="lbl">Ahorro IA</div>
-          <div class="val">−S/ {{ aiSavings }}</div>
-        </div>
       </div>
       <div class="sl-sum-foot">
-        <span class="robot" aria-hidden="true"><UIcon name="i-lucide-bot" /></span>
-        <span>IA generó esta lista según stock crítico y el forecast del fin de semana.</span>
+        <span class="robot" aria-hidden="true"><UIcon name="i-lucide-brain-circuit" /></span>
+        <span>Lista sugerida por el forecast de demanda (próximos {{ horizon }} días)</span>
       </div>
     </section>
 
@@ -115,7 +141,7 @@ function share(): void {
       <div class="sl-section-title">Por comprar <span class="count">{{ pending.length }}</span></div>
       <div v-if="pending.length" class="sl-list">
         <div
-          v-for="item in pending"
+          v-for="item in (pending as ForecastShoppingItem[])"
           :key="item.id"
           class="sl-item"
           role="button"
@@ -138,7 +164,8 @@ function share(): void {
           </div>
           <div class="sl-item-price">{{ formatPEN(item.estimatedCost) }}</div>
           <div v-if="expanded === item.id" class="sl-item-detail" @click.stop>
-            <div class="row"><span>Motivo</span><span class="v">{{ item.reason }}</span></div>
+            <div class="row"><span>Stock actual</span><span class="v">{{ item.currentStock }} {{ item.unit }}</span></div>
+            <div class="row"><span>Déficit forecast</span><span class="v">{{ item.shortfall }} {{ item.unit }}</span></div>
             <div class="row"><span>Cantidad sugerida</span><span class="v">{{ item.suggestedQty }} {{ item.unit }}</span></div>
             <div class="row"><span>Costo estimado</span><span class="v">{{ formatPEN(item.estimatedCost) }}</span></div>
             <NuxtLink :to="`/app/inventario/producto/${item.ingredientId}`" class="sl-detail-link">
@@ -147,11 +174,18 @@ function share(): void {
           </div>
         </div>
       </div>
+      <!-- needsForecast: the core-ai service has no completed run yet -->
+      <UiEmptyState
+        v-else-if="needsForecast"
+        icon="i-lucide-bar-chart-2"
+        title="Forecast no disponible"
+        subtitle="Aún no hay un análisis de demanda completado. Ejecutá el forecast para obtener sugerencias de compra."
+      />
       <UiEmptyState
         v-else
         icon="i-lucide-shopping-cart"
         title="Nada por comprar"
-        subtitle="Tu stock está cubierto. La IA agregará ítems cuando detecte faltantes."
+        subtitle="El forecast no detecta faltantes para los próximos días."
       />
     </section>
 
@@ -205,7 +239,7 @@ function share(): void {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--oliva);
 }
-.sl-sum-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.sl-sum-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .sl-sum-cell {
   background: var(--crema-100);
   border-radius: 10px;
@@ -219,8 +253,7 @@ function share(): void {
   font-variant-numeric: tabular-nums;
 }
 .sl-sum-cell .val.urgent { color: var(--danger); }
-.sl-sum-cell.savings { background: #FBF4E3; }
-.sl-sum-cell.savings .val { color: var(--mostaza-700); }
+/* NOTE: .sl-sum-cell.savings removed — AI savings estimate de-scoped (E05-b). */
 .sl-sum-foot {
   display: flex; align-items: flex-start; gap: 8px;
   font-size: 11.5px; color: var(--fg3);

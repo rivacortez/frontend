@@ -22,6 +22,8 @@ const METHODS: Array<{ id: PaymentMethod, label: string, sub: string, icon: stri
   { id: 'plin', label: 'Plin', sub: 'QR · multi', icon: 'i-lucide-smartphone' },
 ]
 
+const toast = useToast()
+
 const mode = ref<'persona' | 'items'>('persona')
 const persons = ref(2)
 const paidShares = ref<number[]>([])
@@ -160,6 +162,24 @@ async function confirmCobrar(): Promise<void> {
         docType: 'boleta',
       })
       success.value = true
+    }
+    catch (error) {
+      // Roll back all optimistic state pushed before the mutation attempt so the
+      // user can correct and retry without corrupted accumulated-payment state.
+      collectedPayments.value.pop()
+      if (target.key.startsWith('p')) {
+        paidShares.value.pop()
+      }
+      else {
+        paidCuentas.value.pop()
+      }
+      // Reopen the payment modal for the target that failed.
+      cobrarTarget.value = target
+      toast.add({
+        title: errorMessage(error, 'No se pudo registrar el pago'),
+        color: 'error',
+        icon: 'i-lucide-alert-circle',
+      })
     }
     finally {
       busy.value = false

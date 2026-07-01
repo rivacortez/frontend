@@ -5,8 +5,6 @@ definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Pagos — GastronomIA' })
 
 const { data: settings } = useAppSettings()
-const update = useUpdateSettings('payments')
-const toast = useToast()
 const { user } = useUserSession()
 
 const readonly = computed(() => user.value?.role !== 'owner')
@@ -26,18 +24,14 @@ const METHODS = [
 
 const TIP_OPTIONS = [0, 5, 10, 15]
 
-const saving = ref(false)
+// useSettingsSave centralises the try/catch/toast pattern (E04-2 fix):
+// success toast on 2xx, error toast on any rejection — no silent failures.
+const { save: settingsSave, saving } = useSettingsSave('payments', 'Cambios guardados')
 
 async function save(): Promise<void> {
-  if (readonly.value || saving.value) return
-  saving.value = true
-  try {
-    await update.mutateAsync({ ...form })
-    toast.add({ title: 'Cambios guardados', icon: 'i-lucide-check' })
-  }
-  finally {
-    saving.value = false
-  }
+  // Defence-in-depth: guard readonly even though the button is already disabled.
+  if (readonly.value) return
+  await settingsSave({ ...form })
 }
 </script>
 

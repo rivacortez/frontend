@@ -11,6 +11,10 @@ const ingredientId = computed(() => String(route.params.id))
 const { data: ingredients } = useIngredients()
 const { data: recipes } = useRecipes()
 const { data: movements } = useMovements(ingredientId)
+// Widget B: real consumption-based coverage (replaces the local heuristic).
+const { data: coverage } = useIngredientCoverage(ingredientId)
+// Widget C: purchase price history (restored from de-scoped E08 placeholder).
+const { data: priceTrend } = useIngredientPriceTrend(ingredientId)
 
 const product = computed(() => ingredients.value?.find(i => i.id === ingredientId.value))
 
@@ -73,37 +77,9 @@ const statusEmoji = computed(() =>
 
 const isNoCost = computed(() => (product.value?.unitCost ?? 0) === 0)
 
-/* ===== Tendencia de precio (mock alineado a la historia del Limón Sutil) ===== */
-const TREND_SHAPE = [0, 0.05, 0.03, 0.08, 0.05, 0.13, 0.22, 0.4, 0.55, 0.66, 0.82, 1]
-const hasTrend = computed(() => product.value?.id === 'ing-01')
-const trendPct = 30
-const costPrev = computed(() => +((product.value?.unitCost ?? 0) / (1 + trendPct / 100)).toFixed(2))
-const trendSeries = computed<number[]>(() => {
-  const from = costPrev.value
-  const to = product.value?.unitCost ?? 0
-  return TREND_SHAPE.map(t => +(from + (to - from) * t).toFixed(2))
-})
-const chartW = 320
-const chartH = 56
-const trendPoints = computed<[number, number][]>(() => {
-  const s = trendSeries.value
-  const pad = 4
-  const min = Math.min(...s)
-  const max = Math.max(...s)
-  const range = max - min || 1
-  const stepX = (chartW - pad * 2) / (s.length - 1)
-  return s.map((v, i) => [pad + i * stepX, chartH - pad - ((v - min) / range) * (chartH - pad * 2)])
-})
-const trendPath = computed(() =>
-  trendPoints.value.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' '))
-const trendArea = computed(() => {
-  const pts = trendPoints.value
-  const first = pts[0]
-  const last = pts[pts.length - 1]
-  if (!first || !last) return ''
-  return `${trendPath.value} L${last[0]},${chartH} L${first[0]},${chartH} Z`
-})
-const trendLast = computed(() => trendPoints.value[trendPoints.value.length - 1] ?? [0, 0])
+// Widget B (coverage) and Widget C (price trend) are now real — backed by backend
+// endpoints /api/inventory/ingredients/:id/coverage and /api/inventory/price-trend/:id.
+// De-scope lifted by E08. See QA-STATUS/E08-status.md.
 
 /* ===== Recetas que lo usan ===== */
 interface RecipeUsage {
@@ -157,8 +133,28 @@ function movLabel(m: InventoryMovement): string {
   return m.note ?? MOVEMENT_LABELS[m.type]
 }
 
-/* ===== Proyección IA ===== */
-const daysLeft = computed(() => (status.value === 'crit' ? 2 : status.value === 'low' ? 4 : 7))
+/* ===== Cobertura de stock (Widget B) ===== */
+// daysLeft comes from the real backend coverage endpoint (avg daily consumption
+// over 30 days), not from a hardcoded status → days heuristic. `null` means the
+// ingredient has no recent consumption and no estimate is possible.
+const daysLeft = computed<number | null>(() => coverage.value?.daysLeft ?? null)
+const avgDailyConsumption = computed(() => coverage.value?.avgDailyConsumption ?? null)
+const basedOnDays = computed(() => coverage.value?.basedOnDays ?? 30)
+
+/* ===== Tendencia de precio (Widget C) ===== */
+// Points arrive newest-first from the backend. Reverse for chronological display.
+// Fewer than 2 points → no % change is computable.
+const priceTrendPoints = computed(() => (priceTrend.value ?? []).slice(0, 6))
+const priceTrendChange = computed(() => {
+  const pts = priceTrend.value
+  if (!pts || pts.length < 2) return null
+  const newest = pts[0]
+  const oldest = pts[pts.length - 1]
+  if (oldest.unitCost === 0) return null
+  const pct = +((newest.unitCost - oldest.unitCost) / oldest.unitCost * 100).toFixed(1)
+  return { pct, positive: pct > 0 }
+})
+
 const suggestQty = computed(() => {
   const p = product.value
   if (!p) return 1
@@ -188,19 +184,28 @@ const { mutateAsync: updateIngredient, isLoading: savingEdit } = useUpdateIngred
 async function saveEdit(): Promise<void> {
   const p = product.value
   if (!p) return
-  await updateIngredient({
-    id: p.id,
-    name: editForm.name.trim() || p.name,
-    category: editForm.category.trim() || p.category,
-    unit: editForm.unit.trim() || p.unit,
-    unitCost: Number.parseFloat(editForm.cost) || 0,
-    minStock: Number.parseFloat(editForm.min) || 0,
-  })
-  showEdit.value = false
-  toast.add({
-    title: editFocusCost.value ? 'Costo agregado' : 'Cambios guardados',
-    icon: 'i-lucide-check-circle-2',
-  })
+  try {
+    await updateIngredient({
+      id: p.id,
+      name: editForm.name.trim() || p.name,
+      category: editForm.category.trim() || p.category,
+      unit: editForm.unit.trim() || p.unit,
+      unitCost: Number.parseFloat(editForm.cost) || 0,
+      minStock: Number.parseFloat(editForm.min) || 0,
+    })
+    showEdit.value = false
+    toast.add({
+      title: editFocusCost.value ? 'Costo agregado' : 'Cambios guardados',
+      icon: 'i-lucide-check-circle-2',
+    })
+  }
+  catch (error) {
+    toast.add({
+      title: 'Error al guardar',
+      description: errorMessage(error, 'No se pudieron guardar los cambios'),
+      color: 'error',
+    })
+  }
 }
 
 /* Movimiento rápido */
@@ -237,14 +242,23 @@ async function saveQuickMove(): Promise<void> {
     ajuste: 'adjustment',
   }
   const qty = quickType.value === 'salida' ? -quickQtyNum.value : quickQtyNum.value
-  await createMovement({
-    ingredientId: p.id,
-    type: typeMap[quickType.value],
-    qty,
-    note: quickNote.value.trim() || undefined,
-  })
-  showQuickMove.value = false
-  toast.add({ title: `Movimiento (${quickType.value}) registrado`, icon: 'i-lucide-check-circle-2' })
+  try {
+    await createMovement({
+      ingredientId: p.id,
+      type: typeMap[quickType.value],
+      qty,
+      note: quickNote.value.trim() || undefined,
+    })
+    showQuickMove.value = false
+    toast.add({ title: `Movimiento (${quickType.value}) registrado`, icon: 'i-lucide-check-circle-2' })
+  }
+  catch (error) {
+    toast.add({
+      title: 'Error al registrar movimiento',
+      description: errorMessage(error, 'No se pudo guardar el movimiento'),
+      color: 'error',
+    })
+  }
 }
 
 const { mutateAsync: addShopping } = useAddShoppingItem()
@@ -252,13 +266,22 @@ const { mutateAsync: addShopping } = useAddShoppingItem()
 async function addToShopping(qty?: number): Promise<void> {
   const p = product.value
   if (!p) return
-  await addShopping({ ingredientId: p.id, suggestedQty: qty })
-  toast.add({
-    title: qty
-      ? `${qty} ${p.unit} de ${p.name} agregados a Lista de Compras`
-      : `${p.name} agregado a Lista de Compras`,
-    icon: 'i-lucide-shopping-cart',
-  })
+  try {
+    await addShopping({ ingredientId: p.id, suggestedQty: qty })
+    toast.add({
+      title: qty
+        ? `${qty} ${p.unit} de ${p.name} agregados a Lista de Compras`
+        : `${p.name} agregado a Lista de Compras`,
+      icon: 'i-lucide-shopping-cart',
+    })
+  }
+  catch (error) {
+    toast.add({
+      title: 'Error al agregar a lista',
+      description: errorMessage(error, 'No se pudo agregar a la Lista de Compras'),
+      color: 'error',
+    })
+  }
 }
 </script>
 
@@ -328,49 +351,7 @@ async function addToShopping(qty?: number): Promise<void> {
         </div>
       </section>
 
-      <!-- ============ Tendencia de precio ============ -->
-      <section v-if="hasTrend" class="pd-trend" aria-label="Tendencia de precio">
-        <div class="pd-trend-head">
-          <div class="pd-trend-ico" aria-hidden="true">
-            <UIcon name="i-lucide-trending-up" />
-          </div>
-          <div class="pd-trend-body">
-            <div class="pd-trend-title">Precio en aumento</div>
-            <div class="pd-trend-text">
-              Subió <b>{{ trendPct }}%</b> esta semana
-              <br>
-              <span class="from">S/ {{ costPrev.toFixed(2) }}/{{ product.unit }}</span>
-              →
-              <span class="to">S/ {{ product.unitCost.toFixed(2) }}/{{ product.unit }}</span>
-            </div>
-          </div>
-        </div>
-        <svg class="pd-trend-chart" :viewBox="`0 0 ${chartW} ${chartH}`" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="pd-trend-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--danger)" stop-opacity="0.22" />
-              <stop offset="100%" stop-color="var(--danger)" stop-opacity="0" />
-            </linearGradient>
-          </defs>
-          <path :d="trendArea" fill="url(#pd-trend-grad)" />
-          <path :d="trendPath" stroke="var(--danger)" stroke-width="1.75" fill="none" stroke-linecap="round" stroke-linejoin="round" />
-          <circle :cx="trendLast[0]" :cy="trendLast[1]" r="3.5" fill="var(--danger)" />
-          <circle :cx="trendLast[0]" :cy="trendLast[1]" r="6" fill="var(--danger)" opacity="0.18" />
-        </svg>
-        <div class="pd-trend-foot">
-          <div class="pd-trend-axis" aria-hidden="true">
-            <span>hace 30 d</span>
-            <span>hace 15 d</span>
-            <span>hoy</span>
-          </div>
-          <button
-            class="pd-trend-link"
-            @click="toast.add({ title: 'Análisis de precio — disponible pronto', icon: 'i-lucide-bar-chart-3' })"
-          >
-            Ver análisis <UIcon name="i-lucide-chevron-right" />
-          </button>
-        </div>
-      </section>
+      <!-- NOTE: price trend and coverage are now real — wired to backend endpoints. -->
 
       <!-- ============ Acciones rápidas ============ -->
       <section class="pd-quick" aria-label="Acciones rápidas">
@@ -462,32 +443,42 @@ async function addToShopping(qty?: number): Promise<void> {
           title="Sin movimientos recientes"
           subtitle="Registra entradas o salidas para ver el historial."
         />
-        <button
+        <NuxtLink
           v-if="visibleMovements.length > 0"
           class="pd-mov-all"
-          @click="toast.add({ title: 'Historial completo — disponible pronto', icon: 'i-lucide-history' })"
+          :to="`/app/inventario/movimientos?ingredientId=${ingredientId}`"
         >
           Ver historial completo <UIcon name="i-lucide-arrow-right" />
-        </button>
+        </NuxtLink>
       </section>
 
-      <!-- ============ Proyección IA ============ -->
-      <section class="pd-proj" aria-label="Proyección IA">
-        <div class="pd-proj-glow" aria-hidden="true" />
+      <!-- ============ Cobertura de stock (Widget B) ============ -->
+      <!-- Real consumption-based coverage from backend — not a heuristic. -->
+      <section class="pd-proj" aria-label="Cobertura de stock">
         <div class="pd-proj-head">
           <div class="pd-proj-ico" aria-hidden="true">
-            <UIcon name="i-lucide-bot" />
-            <span class="spark"><UIcon name="i-lucide-sparkles" /></span>
+            <UIcon name="i-lucide-calendar-clock" />
           </div>
           <div class="pd-proj-body">
             <div class="pd-proj-title">
-              Proyección IA
+              Cobertura de stock
               <span class="tag">CONSUMO</span>
             </div>
-            <p class="pd-proj-text">
-              Al ritmo actual, te alcanza para <span class="days">{{ daysLeft }} días</span> más.
-              Te recomiendo comprar <b>{{ suggestQty }} {{ product.unit }}</b> adicionales esta semana.
-            </p>
+            <template v-if="coverage">
+              <p class="pd-proj-text">
+                <template v-if="daysLeft !== null">
+                  Stock disponible por aproximadamente
+                  <span class="days">{{ Math.floor(daysLeft) }} días</span>.
+                  Consumo promedio: <b>{{ avgDailyConsumption }} {{ product.unit }}/día</b>.
+                </template>
+                <template v-else>
+                  <span class="days-null">Sin consumo reciente para estimar cobertura.</span>
+                  No hay movimientos en los últimos {{ basedOnDays }} días.
+                </template>
+              </p>
+              <p class="pd-proj-caption">Basado en consumo de los últimos {{ basedOnDays }} días</p>
+            </template>
+            <p v-else class="pd-proj-text pd-proj-loading">Calculando cobertura…</p>
           </div>
         </div>
         <div class="pd-proj-actions">
@@ -495,6 +486,35 @@ async function addToShopping(qty?: number): Promise<void> {
             <UIcon name="i-lucide-shopping-cart" /> Agregar {{ suggestQty }} {{ product.unit }} a lista
           </button>
         </div>
+      </section>
+
+      <!-- ============ Tendencia de precio de compra (Widget C) ============ -->
+      <!-- Honest label: derived from purchase history, NOT IA. -->
+      <section class="pd-trend-section" aria-label="Tendencia de precio de compra">
+        <div class="pd-section-head">
+          <div class="pd-section-title">
+            Tendencia de precio de compra
+            <span class="count">(historial)</span>
+          </div>
+          <span v-if="priceTrendChange" class="pd-trend-badge" :class="priceTrendChange.positive ? 'up' : 'down'">
+            {{ priceTrendChange.positive ? '+' : '' }}{{ priceTrendChange.pct }}%
+          </span>
+        </div>
+        <div v-if="priceTrendPoints.length >= 2" class="pd-trend-list">
+          <div
+            v-for="pt in priceTrendPoints"
+            :key="pt.recordedAt"
+            class="pd-trend-row"
+            :aria-label="`${formatShortDate(pt.recordedAt)}: S/ ${pt.unitCost.toFixed(2)} — ${pt.source === 'purchase_order' ? 'orden de compra' : 'manual'}`"
+          >
+            <span class="pd-trend-date">{{ formatShortDate(pt.recordedAt) }}</span>
+            <span class="pd-trend-src">{{ pt.source === 'purchase_order' ? 'OC' : 'Manual' }}</span>
+            <span class="pd-trend-cost">S/ {{ pt.unitCost.toFixed(2) }}</span>
+          </div>
+        </div>
+        <p v-else class="pd-trend-empty">
+          Sin historial suficiente para mostrar tendencia (se necesitan al menos 2 registros).
+        </p>
       </section>
 
       <!-- ============ CTA fija ============ -->
@@ -766,71 +786,7 @@ async function addToShopping(qty?: number): Promise<void> {
 }
 .pd-kv .value .nocost-dash { color: var(--mostaza-700); font-size: 15px; font-weight: 600; }
 
-/* ============ TENDENCIA ============ */
-.pd-trend {
-  margin: 14px 16px 0;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  padding: 14px;
-  position: relative; overflow: hidden;
-}
-.pd-trend::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-  width: 3px; background: var(--danger);
-}
-.pd-trend-head { display: flex; gap: 12px; align-items: center; }
-.pd-trend-ico {
-  width: 38px; height: 38px; border-radius: 10px;
-  background: var(--danger-bg); color: var(--danger);
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.pd-trend-ico .iconify { width: 18px; height: 18px; }
-.pd-trend-body { flex: 1; min-width: 0; }
-.pd-trend-title { font-size: 13.5px; font-weight: 600; color: var(--fg1); }
-.pd-trend-text {
-  margin-top: 2px;
-  font-size: 12px; color: var(--fg2); line-height: 1.45;
-}
-.pd-trend-text .from {
-  font-family: var(--font-mono);
-  text-decoration: line-through;
-  opacity: 0.7;
-  margin: 0 2px;
-}
-.pd-trend-text .to {
-  font-family: var(--font-mono);
-  color: var(--danger); font-weight: 700;
-}
-.pd-trend-text b { color: var(--danger); font-weight: 700; }
-.pd-trend-chart {
-  margin-top: 12px;
-  width: 100%;
-  height: 56px;
-  display: block;
-}
-.pd-trend-foot {
-  margin-top: 10px;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px;
-}
-.pd-trend-axis {
-  display: flex; justify-content: space-between;
-  font-family: var(--font-mono);
-  font-size: 10px; color: var(--fg3);
-  flex: 1;
-}
-.pd-trend-link {
-  background: none; border: 0;
-  font: inherit; font-size: 12.5px; font-weight: 600;
-  color: var(--terracotta-700);
-  cursor: pointer;
-  display: inline-flex; align-items: center; gap: 3px;
-  flex-shrink: 0;
-}
-.pd-trend-link:hover { color: var(--terracotta); }
-.pd-trend-link .iconify { width: 13px; height: 13px; }
+/* Price trend styles live at .pd-trend-section below (Widget C — E08 restored). */
 
 /* ============ ACCIONES RÁPIDAS ============ */
 .pd-quick {
@@ -1021,46 +977,26 @@ async function addToShopping(qty?: number): Promise<void> {
 .pd-mov-all:hover { background: var(--crema-100); }
 .pd-mov-all .iconify { width: 14px; height: 14px; }
 
-/* ============ PROYECCIÓN IA ============ */
+/* ============ ESTIMACIÓN DE COBERTURA ============ */
 .pd-proj {
   margin: 22px 16px 0;
-  position: relative;
   background: linear-gradient(155deg, var(--crema-50) 0%, var(--oliva-100) 220%);
   border: 1px solid rgba(110, 123, 97, 0.22);
   border-radius: 16px;
   padding: 14px;
-  overflow: hidden;
-}
-.pd-proj-glow {
-  position: absolute; inset: -1px;
-  border-radius: 16px;
-  padding: 1px;
-  background: linear-gradient(135deg, var(--oliva) 0%, transparent 35%, transparent 65%, var(--terracotta-300) 100%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0.55;
-  pointer-events: none;
 }
 .pd-proj-head {
   display: flex; gap: 12px; align-items: flex-start;
-  position: relative;
 }
 .pd-proj-ico {
   width: 38px; height: 38px; border-radius: 11px;
-  background: linear-gradient(140deg, var(--oliva-100), var(--crema-100));
+  background: var(--oliva-100);
   color: var(--oliva-700);
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid rgba(110, 123, 97, 0.18);
   flex-shrink: 0;
-  position: relative;
 }
 .pd-proj-ico > .iconify { width: 19px; height: 19px; }
-.pd-proj-ico .spark {
-  position: absolute; top: -3px; right: -3px;
-  color: var(--mostaza-700);
-}
-.pd-proj-ico .spark .iconify { width: 10px; height: 10px; }
 .pd-proj-body { flex: 1; min-width: 0; }
 .pd-proj-title {
   font-size: 13.5px; font-weight: 600; color: var(--fg1);
@@ -1081,10 +1017,67 @@ async function addToShopping(qty?: number): Promise<void> {
   font-family: var(--font-mono);
   color: var(--danger); font-weight: 700;
 }
+.pd-proj-caption {
+  margin: 6px 0 0;
+  font-size: 11px; color: var(--fg3); font-style: italic;
+}
+.pd-proj-loading { color: var(--fg3); font-style: italic; }
+.pd-proj-text .days-null { color: var(--mostaza-700); font-weight: 600; }
 .pd-proj-actions {
   display: flex; gap: 8px;
   margin-top: 12px;
-  position: relative;
+}
+
+/* ============ TENDENCIA DE PRECIO (Widget C) ============ */
+.pd-trend-section {
+  margin-top: 22px;
+}
+.pd-trend-section .pd-section-head {
+  padding: 0 16px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+}
+.pd-trend-badge {
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 700;
+  padding: 3px 9px; border-radius: 999px;
+}
+.pd-trend-badge.up { background: var(--danger-bg); color: var(--danger); }
+.pd-trend-badge.down { background: var(--success-bg); color: var(--oliva-700); }
+.pd-trend-list {
+  margin: 0 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--pure-white);
+  overflow: hidden;
+}
+.pd-trend-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.pd-trend-row:last-child { border-bottom: none; }
+.pd-trend-date { color: var(--fg2); font-weight: 500; }
+.pd-trend-src {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  background: var(--crema-200); color: var(--fg3);
+  padding: 2px 6px; border-radius: 4px;
+}
+.pd-trend-cost {
+  font-family: var(--font-mono);
+  font-size: 13.5px; font-weight: 600; color: var(--fg1);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pd-trend-empty {
+  margin: 0 16px;
+  font-size: 12.5px; color: var(--fg3); font-style: italic;
+  padding: 12px 0;
 }
 
 /* ============ CTA FIJA ============ */

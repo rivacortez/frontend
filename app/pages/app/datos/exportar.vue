@@ -24,8 +24,26 @@ const selected = ref<Dataset['id'][]>(['sales'])
 const range = ref<'7d' | '30d' | 'all'>('30d')
 const generating = ref(false)
 
+/**
+ * Applies the active date-range filter (`range`) to the sales dataset.
+ * Ingredients and recipes don't have a meaningful date field — they are
+ * always exported as a current snapshot regardless of the selected range.
+ */
+const filteredSales = computed(() => {
+  const all = sales.value ?? []
+  if (range.value === 'all') return all
+  const days = range.value === '7d' ? 7 : 30
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - days)
+  return all.filter(s => new Date(s.date) >= cutoff)
+})
+
+/** Count of sales that will actually be exported given the current range selection. */
+const filteredSalesCount = computed(() => filteredSales.value.length)
+
 const counts = computed<Record<Dataset['id'], number>>(() => ({
-  sales: sales.value?.length ?? 0,
+  // Sales count reflects the active date filter so the badge stays honest.
+  sales: filteredSalesCount.value,
   ingredients: ingredients.value?.length ?? 0,
   recipes: recipes.value?.length ?? 0,
 }))
@@ -59,14 +77,13 @@ async function exportAll(): Promise<void> {
   if (selected.value.length === 0 || generating.value) return
   generating.value = true
   try {
-    // simula la generación del archivo en el servidor
-    await new Promise(resolve => setTimeout(resolve, 900))
     const today = new Date().toISOString().slice(0, 10)
 
     if (selected.value.includes('sales')) {
       const rows: Array<Array<string | number | undefined>> = [
         ['serie', 'numero', 'tipo', 'fecha', 'mesa', 'cliente', 'subtotal', 'igv', 'total', 'metodo', 'estado'],
-        ...(sales.value ?? []).map(s => [
+        // Apply the active date-range filter; ingredients/recipes are full snapshots.
+        ...filteredSales.value.map(s => [
           s.serie, s.number, s.docType, s.date, s.tableLabel, s.customer, s.subtotal, s.igv, s.total, s.method, s.status,
         ]),
       ]

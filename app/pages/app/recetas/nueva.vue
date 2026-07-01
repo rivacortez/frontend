@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Ingredient } from '#shared/types/domain'
+import type { Ingredient, Recipe } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Nueva receta — GastronomIA' })
@@ -64,10 +64,21 @@ function pickPhoto(source: 'camera' | 'gallery'): void {
   })
 }
 
+/* ===== RBAC (E02-6) ===== */
+// La ruta /nueva solo debe cargarse si el usuario puede escribir, pero por
+// robustez también bloqueamos el guardado si el role cambió entre sesiones.
+const { user } = useUserSession()
+const canWrite = computed(() => user.value?.role !== 'staff')
+
 /* ===== Paso 2 · Insumos / BOM ===== */
 interface DraftItem {
   key: string
+  /** ID del insumo del catálogo. Vacío cuando es una sub-receta. */
   ingredientId: string
+  /** ID de la sub-receta referenciada (HU-02-08). Mutuamente exclusivo con ingredientId. */
+  subRecipeId?: string
+  /** true cuando la línea es una sub-receta (no un insumo del inventario). */
+  isSubRecipe?: boolean
   name: string
   qty: number
   unit: string
@@ -96,9 +107,22 @@ const showSearch = ref(false)
 const showDetail = ref(false)
 const showCreate = ref(false)
 
+// E02-5: selector de sub-recetas
+const showSubRecipeSearch = ref(false)
+const subRecipeQ = ref('')
+
 const searchQ = ref('')
 const { data: searchData } = useIngredients(searchQ)
 const { data: allIngredients } = useIngredients()
+
+// Sub-recetas disponibles (kind='sub_recipe') para agregar al BOM (HU-02-08).
+const { data: allRecipes } = useRecipes()
+const subRecipes = computed<Recipe[]>(() =>
+  (allRecipes.value ?? []).filter(r => r.kind === 'sub_recipe'))
+const subRecipeResults = computed<Recipe[]>(() => {
+  const q = subRecipeQ.value.trim().toLowerCase()
+  return q ? subRecipes.value.filter(r => r.name.toLowerCase().includes(q)) : subRecipes.value
+})
 
 const searchResults = computed<Ingredient[]>(() => searchData.value ?? [])
 const showNotFound = computed(() => searchQ.value.trim().length > 0 && searchResults.value.length === 0)
@@ -197,7 +221,21 @@ function detailBack(): void {
   if (!editingKey.value) showSearch.value = true
 }
 
-/** Conversión simple entre unidades compatibles (g↔kg, ml↔L). */
+/**
+ * Familia de unidades para detectar conversiones incompatibles (E02-8).
+ * Las familias son las mismas que usa el backend (`factorToBase` en la misma familia).
+ */
+const UNIT_FAMILY: Record<string, 'mass' | 'volume' | 'count'> = {
+  g: 'mass', kg: 'mass',
+  ml: 'volume', L: 'volume',
+  u: 'count', p: 'count',
+}
+
+/**
+ * Conversión simple entre unidades compatibles (g↔kg, ml↔L).
+ * Devuelve `null` cuando las unidades pertenecen a familias distintas
+ * (por ejemplo g→ml) — nunca falla silenciosamente como antes (E02-8).
+ */
 function convertQty(qty: number, from: string, to: string): number | null {
   if (from === to) return qty
   const table: Record<string, Record<string, number>> = {
@@ -208,6 +246,18 @@ function convertQty(qty: number, from: string, to: string): number | null {
   }
   const factor = table[from]?.[to]
   return factor == null ? null : qty * factor
+}
+
+/**
+ * Comprueba si dos códigos de unidad pertenecen a familias distintas.
+ * Se usa para mostrar un error claro antes de permitir guardar el item.
+ */
+function areUnitFamiliesIncompatible(a: string, b: string): boolean {
+  const fa = UNIT_FAMILY[a]
+  const fb = UNIT_FAMILY[b]
+  // Si alguna unidad es desconocida (custom), no bloqueamos — el backend lo validará.
+  if (!fa || !fb) return false
+  return fa !== fb
 }
 
 const detailQtyNum = computed(() => Number.parseFloat(dQty.value) || 0)
@@ -229,7 +279,21 @@ function itemBeingEditedCost(): number {
 
 const detailNet = computed(() => +(detailCost.value * (1 + dWaste.value / 100)).toFixed(2))
 const detailIsNoCost = computed(() => editingNoCost.value || (pickedIngredient.value?.unitCost === 0))
-const canSaveDetail = computed(() => detailQtyNum.value > 0)
+
+/**
+ * E02-8: error de compatibilidad de familias de unidades.
+ * Muestra un mensaje claro en lugar de calcular un costo incorrecto (ej.: 200 ml
+ * de un insumo en kg → antes daba cost × 200 en vez de 0.2 kg).
+ */
+const unitConversionError = computed<string | null>(() => {
+  const ing = pickedIngredient.value
+  if (!ing || ing.unitCost === 0 || dUnit.value === ing.unit) return null
+  return areUnitFamiliesIncompatible(dUnit.value, ing.unit)
+    ? `No se puede convertir ${dUnit.value} → ${ing.unit}: son familias distintas. Cambia la unidad.`
+    : null
+})
+
+const canSaveDetail = computed(() => detailQtyNum.value > 0 && !unitConversionError.value)
 
 function saveDetail(): void {
   if (!canSaveDetail.value) return
@@ -297,6 +361,33 @@ function createLite(): void {
   })
   showCreate.value = false
   toast.add({ title: 'Insumo creado en Stock. Agrega el costo para margen exacto.', icon: 'i-lucide-package-plus' })
+}
+
+/* ===== Sub-recetas (E02-5 / HU-02-08) ===== */
+
+/**
+ * Agrega una sub-receta como línea del BOM. El backend calculará su costo
+ * recursivo al guardar; aquí usamos `recipe.cost` como aproximación visual.
+ */
+function pickSubRecipe(sub: Recipe): void {
+  draftSeq += 1
+  items.value.push({
+    key: `it-${draftSeq}`,
+    ingredientId: '',
+    subRecipeId: sub.id,
+    isSubRecipe: true,
+    name: sub.name,
+    qty: 1,
+    unit: 'p',
+    cost: sub.cost,
+    wastePct: 0,
+    wasteReason: null,
+    noCost: sub.cost === 0,
+    critical: false,
+  })
+  showSubRecipeSearch.value = false
+  subRecipeQ.value = ''
+  toast.add({ title: `Sub-receta "${sub.name}" agregada al BOM`, icon: 'i-lucide-layers' })
 }
 
 /* Costeo acumulado */
@@ -419,29 +510,46 @@ function discard(): void {
 /* ===== Guardar ===== */
 const { mutateAsync: createRecipe, isLoading: saving } = useCreateRecipe()
 
+/**
+ * Guarda la nueva receta (E02-3: try/catch con feedback de error).
+ * Si el backend devuelve 400/403/red, muestra un toast de error y
+ * re-habilita el botón de guardado para reintentar — nunca deja el overlay colgado.
+ * Incluye sub-recetas en el BOM (E02-5: `subRecipeId` cuando corresponde).
+ */
 async function save(): Promise<void> {
   if (saving.value) return
-  const selectedTime = TIME_OPTIONS.find(t => t.id === timeId.value)
-  const created = await createRecipe({
-    name: name.value.trim(),
-    category: category.value,
-    kind: 'dish',
-    description: description.value.trim() || undefined,
-    emoji: draftEmoji.value,
-    sellPrice: livePrice.value,
-    items: items.value.map(i => ({
-      ingredientId: i.ingredientId,
-      name: i.name,
-      qty: i.qty,
-      unit: i.unit,
-      cost: i.cost,
-      wastePct: i.wastePct,
-    })),
-    prepMinutes: selectedTime?.minutes,
-    active: true,
-  })
-  toast.add({ title: `${created.name} creado · Margen ${created.marginPct}%`, icon: 'i-lucide-check-circle-2' })
-  await navigateTo(`/app/recetas/${created.id}`)
+  try {
+    const selectedTime = TIME_OPTIONS.find(t => t.id === timeId.value)
+    const created = await createRecipe({
+      name: name.value.trim(),
+      category: category.value,
+      kind: 'dish',
+      description: description.value.trim() || undefined,
+      emoji: draftEmoji.value,
+      sellPrice: livePrice.value,
+      items: items.value.map(i => ({
+        ingredientId: i.ingredientId,
+        subRecipeId: i.subRecipeId,
+        name: i.name,
+        qty: i.qty,
+        unit: i.unit,
+        cost: i.cost,
+        wastePct: i.wastePct,
+      })),
+      prepMinutes: selectedTime?.minutes,
+      active: true,
+    })
+    toast.add({ title: `${created.name} creado · Margen ${created.marginPct}%`, icon: 'i-lucide-check-circle-2' })
+    await navigateTo(`/app/recetas/${created.id}`)
+  }
+  catch (error) {
+    // isLoading (saving) ya fue reseteado por Pinia Colada al fallar la mutación.
+    toast.add({
+      title: errorMessage(error, 'No se pudo guardar la receta'),
+      color: 'error',
+      icon: 'i-lucide-alert-circle',
+    })
+  }
 }
 </script>
 
@@ -662,9 +770,15 @@ async function save(): Promise<void> {
             </div>
           </button>
         </div>
-        <button type="button" class="rw-add-bom" @click="openSearch">
-          <UIcon name="i-lucide-plus" /> Agregar insumo
-        </button>
+        <div class="rw-add-bom-row">
+          <button type="button" class="rw-add-bom" @click="openSearch">
+            <UIcon name="i-lucide-plus" /> Agregar insumo
+          </button>
+          <!-- E02-5: agregar sub-receta como componente del BOM (HU-02-08) -->
+          <button type="button" class="rw-add-bom rw-add-sub" @click="showSubRecipeSearch = true">
+            <UIcon name="i-lucide-layers" /> Sub-receta
+          </button>
+        </div>
       </template>
 
       <div class="rw-note">
@@ -814,23 +928,16 @@ async function save(): Promise<void> {
         </div>
       </section>
 
-      <!-- Sugerencia IA -->
+      <!-- Precio sugerido para margen 30% (calculado localmente sobre el costo real del BOM) -->
       <section v-if="marginPct < 30 && totalCost > 0" class="rw3-section">
         <div class="rw3-ai">
-          <span class="ico" aria-hidden="true"><UIcon name="i-lucide-sparkles" /></span>
+          <span class="ico" aria-hidden="true"><UIcon name="i-lucide-calculator" /></span>
           <div class="body">
-            <b>GastronomIA sugiere:</b> para alcanzar un margen de <b>30%</b>, el precio debería ser
-            <b>{{ fmtMoney(suggestedPrice) }}</b>. Comparado con tu zona (Miraflores), está en rango
-            competitivo para platos similares.
+            <b>Precio sugerido (margen 30%):</b> para alcanzar un margen de <b>30%</b>
+            sobre el costo actual, el precio debería ser <b>{{ fmtMoney(suggestedPrice) }}</b>.
             <div class="actions">
               <button type="button" class="primary" @click="setPrice(suggestedPrice)">
                 Aplicar {{ fmtMoney(suggestedPrice) }}
-              </button>
-              <button
-                type="button"
-                @click="toast.add({ title: 'Análisis de mercado — disponible pronto', icon: 'i-lucide-bar-chart-3' })"
-              >
-                Ver análisis
               </button>
             </div>
           </div>
@@ -1001,6 +1108,12 @@ async function save(): Promise<void> {
         </div>
       </div>
 
+      <!-- E02-8: error de compatibilidad de unidades -->
+      <div v-if="unitConversionError" class="rw-unit-error" role="alert">
+        <UIcon name="i-lucide-alert-triangle" />
+        {{ unitConversionError }}
+      </div>
+
       <!-- Merma -->
       <div class="rw-field sheet-gap">
         <label class="rw-label" for="merma-input">Merma <span class="opt">opcional</span></label>
@@ -1118,6 +1231,51 @@ async function save(): Promise<void> {
           </button>
         </div>
       </template>
+    </UiBottomSheet>
+
+    <!-- ============ Sheet: buscar sub-receta (E02-5 / HU-02-08) ============ -->
+    <UiBottomSheet v-model="showSubRecipeSearch" title="Agregar sub-receta">
+      <label class="rw-search-input" for="search-subrecipe">
+        <UIcon name="i-lucide-search" />
+        <input
+          id="search-subrecipe"
+          v-model="subRecipeQ"
+          type="search"
+          placeholder="Buscar bases, fondos, masas…"
+          autocomplete="off"
+        >
+        <button
+          v-if="subRecipeQ"
+          class="rw-search-clear"
+          aria-label="Limpiar búsqueda"
+          @click="subRecipeQ = ''"
+        >
+          <UIcon name="i-lucide-x" />
+        </button>
+      </label>
+
+      <div v-if="subRecipeResults.length === 0" class="rw-not-found">
+        <h4>Sin sub-recetas</h4>
+        <p>Aún no tienes bases o fondos creados como sub-receta.</p>
+      </div>
+      <button
+        v-for="sub in subRecipeResults"
+        :key="sub.id"
+        type="button"
+        class="rw-search-result"
+        @click="pickSubRecipe(sub)"
+      >
+        <span class="rw-search-result-ico">
+          <span class="emoji">{{ sub.emoji ?? '🥣' }}</span>
+        </span>
+        <div>
+          <div class="rw-search-result-name">{{ sub.name }}</div>
+          <div class="rw-search-result-meta">Costo: {{ fmtMoney(sub.cost) }}</div>
+        </div>
+        <div class="rw-search-result-cost">
+          <span class="sub-badge"><UIcon name="i-lucide-layers" /> Sub</span>
+        </div>
+      </button>
     </UiBottomSheet>
 
     <!-- ============ Modal: descartar ============ -->
@@ -2492,4 +2650,43 @@ async function save(): Promise<void> {
   margin: 0;
 }
 @keyframes rw3Spin { to { transform: rotate(360deg); } }
+
+/* ============ E02-5: fila de botones agregar insumo + sub-receta ============ */
+.rw-add-bom-row {
+  display: flex; gap: 8px;
+  padding: 0 16px;
+  margin-top: 10px;
+}
+.rw-add-bom-row .rw-add-bom { flex: 1; margin: 0; }
+.rw-add-sub {
+  background: var(--crema-100) !important;
+  color: var(--espresso) !important;
+  border-color: var(--border) !important;
+}
+.rw-add-sub:hover { background: var(--crema-200) !important; }
+
+/* Badge en el resultado de sub-receta */
+.sub-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-sans);
+  font-size: 10.5px; font-weight: 600;
+  color: var(--espresso);
+  background: var(--crema-200);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.sub-badge .iconify { width: 10px; height: 10px; }
+
+/* ============ E02-8: error de compatibilidad de unidades ============ */
+.rw-unit-error {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid rgba(179, 58, 42, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12.5px; line-height: 1.4;
+  margin-bottom: 14px;
+}
+.rw-unit-error .iconify { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
 </style>
