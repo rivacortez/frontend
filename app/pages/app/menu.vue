@@ -39,7 +39,8 @@ const allGroups: MenuGroup[] = [
   {
     title: 'Datos',
     entries: [
-      { icon: 'i-lucide-upload', label: 'Importar datos', sub: 'CSV desde TumiSoft y otros', to: '/app/datos/importar' },
+      { icon: 'i-lucide-sparkles', label: 'Importar carta con IA', sub: 'Subí tu menú en PDF, Excel o CSV', to: '/app/datos/importar-carta', ownerOnly: true },
+      { icon: 'i-lucide-upload', label: 'Importar historial de ventas', sub: 'CSV desde TumiSoft y otros', to: '/app/datos/importar' },
       { icon: 'i-lucide-download', label: 'Exportar datos', sub: 'Descarga tus registros', to: '/app/datos/exportar' },
     ],
   },

@@ -14,18 +14,23 @@ const { user } = useUserSession()
 // Solo owner/manager (el backend 403ea a staff en cada endpoint de costeo).
 const canView = computed(() => user.value?.role === 'owner' || user.value?.role === 'manager')
 
-// Período seleccionado (YYYY-MM). Por defecto el mes actual (zona America/Lima).
-function currentPeriod(): string {
+// Período seleccionado (YYYY-MM). Por defecto el ÚLTIMO MES COMPLETO (zona America/Lima).
+// El costeo es retrospectivo: defaultear al mes en curso cuando recién empieza genera
+// cifPerUnit disparado (totalUnits ≈ 0 → S/190+/u → márgenes −200% a −1100%).
+// El mes anterior siempre tiene datos completos → cifPerUnit realista → márgenes sanos.
+function lastCompletePeriod(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     year: 'numeric',
     month: '2-digit',
     timeZone: 'America/Lima',
   }).formatToParts(new Date())
-  const y = parts.find(p => p.type === 'year')?.value ?? '1970'
-  const m = parts.find(p => p.type === 'month')?.value ?? '01'
-  return `${y}-${m}`
+  const y = parseInt(parts.find(p => p.type === 'year')?.value ?? '1970', 10)
+  const m = parseInt(parts.find(p => p.type === 'month')?.value ?? '01', 10)
+  const prevM = m === 1 ? 12 : m - 1
+  const prevY = m === 1 ? y - 1 : y
+  return `${prevY}-${String(prevM).padStart(2, '0')}`
 }
-const period = ref(currentPeriod())
+const period = ref(lastCompletePeriod())
 
 const { data: report, isLoading } = useDishCosting(period, canView)
 const { data: variance } = useCostVariance(period, canView)
