@@ -7,9 +7,12 @@ useSeoMeta({ title: 'Costos indirectos (CIF) — GastronomIA' })
 const toast = useToast()
 const { user } = useUserSession()
 
-// Costeo = info de gestión (CASL Report): owner/manager. El backend devuelve 403 a
-// staff igualmente; aquí solo se bloquea la edición y se avisa.
+// Costeo = info de gestión (CASL Report): owner/manager only.
+// The backend 403s staff on every overhead-costs endpoint (read AND write).
+// `canView` gates the data fetch so the 403 is never fired for staff.
 const readonly = computed(() => user.value?.role !== 'owner' && user.value?.role !== 'manager')
+/** True when the current user may read and mutate overhead costs (owner or manager). */
+const canView = computed(() => !readonly.value)
 
 // Período seleccionado (YYYY-MM). Por defecto el mes actual (zona America/Lima).
 function currentPeriod(): string {
@@ -24,7 +27,8 @@ function currentPeriod(): string {
 }
 const period = ref(currentPeriod())
 
-const { data: costs, isLoading } = useOverheadCosts(period)
+// Query is disabled for staff: no network call fires, `costs` stays null.
+const { data: costs, isLoading } = useOverheadCosts(period, canView)
 const { mutateAsync: createCost, isLoading: creating } = useCreateOverheadCost()
 const { mutateAsync: updateCost, isLoading: updating } = useUpdateOverheadCost()
 const { mutateAsync: deleteCost } = useDeleteOverheadCost()
@@ -112,78 +116,79 @@ async function remove(c: OverheadCost): Promise<void> {
       </template>
     </UiScreenHeader>
 
-    <UAlert
-      v-if="readonly"
-      color="warning"
-      variant="subtle"
+    <!-- Sin acceso (staff): shown instead of content; no API call fires for this role. -->
+    <UiEmptyState
+      v-if="!canView"
       icon="i-lucide-lock"
-      title="Solo propietario y encargado gestionan los costos indirectos"
-      class="cat-readonly"
+      title="Sin acceso a los costos indirectos"
+      subtitle="Los costos indirectos son información de gestión: solo el propietario y el encargado pueden verlos."
     />
 
-    <p class="cat-intro">
-      <UIcon name="i-lucide-info" />
-      Los <b>costos indirectos de fabricación (CIF)</b> —alquiler, sueldos, servicios— se cargan por mes y se prorratean entre las unidades vendidas para calcular el costo total de cada plato.
-    </p>
+    <template v-else>
+      <p class="cat-intro">
+        <UIcon name="i-lucide-info" />
+        Los <b>costos indirectos de fabricación (CIF)</b> —alquiler, sueldos, servicios— se cargan por mes y se prorratean entre las unidades vendidas para calcular el costo total de cada plato.
+      </p>
 
-    <!-- Selector de período -->
-    <div class="ovh-period">
-      <label class="ovh-period-field">
-        <span>Período</span>
-        <input v-model="period" type="month" aria-label="Período (mes)">
-      </label>
-      <div class="ovh-period-total">
-        <span class="ovh-period-total-label">Total CIF del mes</span>
-        <span class="ovh-period-total-val">{{ formatPEN(total) }}</span>
-      </div>
-    </div>
-
-    <div v-if="all.length" class="cat-list ovh-list">
-      <div v-for="c in all" :key="c.id" class="cat-row">
-        <span class="ovh-ico" aria-hidden="true"><UIcon name="i-lucide-receipt-text" /></span>
-        <div class="cat-row-body">
-          <div class="cat-row-name">{{ c.concept }}</div>
-          <div class="cat-row-sub">{{ formatPEN(Number(c.amount)) }}</div>
-        </div>
-        <div v-if="!readonly" class="cat-row-actions">
-          <button class="cat-icon-btn" aria-label="Editar" @click="openEdit(c)"><UIcon name="i-lucide-pencil" /></button>
-          <button class="cat-icon-btn danger" aria-label="Eliminar" @click="remove(c)"><UIcon name="i-lucide-trash-2" /></button>
+      <!-- Selector de período -->
+      <div class="ovh-period">
+        <label class="ovh-period-field">
+          <span>Período</span>
+          <input v-model="period" type="month" aria-label="Período (mes)">
+        </label>
+        <div class="ovh-period-total">
+          <span class="ovh-period-total-label">Total CIF del mes</span>
+          <span class="ovh-period-total-val">{{ formatPEN(total) }}</span>
         </div>
       </div>
-    </div>
 
-    <UiEmptyState
-      v-else-if="!isLoading"
-      icon="i-lucide-receipt-text"
-      title="Sin costos indirectos este mes"
-      :subtitle="`Agrega los CIF de ${periodLabel(period)} (alquiler, sueldos, servicios) para prorratearlos sobre las ventas.`"
-    >
-      <button v-if="!readonly" class="btn btn-primary" @click="openCreate">
-        <UIcon name="i-lucide-plus" /> Nuevo costo indirecto
-      </button>
-    </UiEmptyState>
-
-    <UiBottomSheet v-model="showForm" :title="editing ? 'Editar costo indirecto' : 'Nuevo costo indirecto'" :subtitle="periodLabel(period)">
-      <form class="cat-form" @submit.prevent="submit">
-        <label class="cat-field">
-          <span>Concepto</span>
-          <input v-model="form.concept" type="text" placeholder="Alquiler del local">
-        </label>
-        <label class="cat-field">
-          <span>Monto del mes (S/)</span>
-          <input v-model="form.amount" type="number" step="0.01" min="0" inputmode="decimal" placeholder="3500.00">
-        </label>
-      </form>
-      <template #cta="{ close }">
-        <div class="cat-cta">
-          <button class="btn btn-ghost" @click="close">Cancelar</button>
-          <button class="btn btn-primary" :disabled="busy" @click="submit">
-            <UIcon :name="busy ? 'i-lucide-loader-circle' : 'i-lucide-check'" :class="{ spin: busy }" />
-            {{ editing ? 'Guardar cambios' : 'Agregar CIF' }}
-          </button>
+      <div v-if="all.length" class="cat-list ovh-list">
+        <div v-for="c in all" :key="c.id" class="cat-row">
+          <span class="ovh-ico" aria-hidden="true"><UIcon name="i-lucide-receipt-text" /></span>
+          <div class="cat-row-body">
+            <div class="cat-row-name">{{ c.concept }}</div>
+            <div class="cat-row-sub">{{ formatPEN(Number(c.amount)) }}</div>
+          </div>
+          <div v-if="!readonly" class="cat-row-actions">
+            <button class="cat-icon-btn" aria-label="Editar" @click="openEdit(c)"><UIcon name="i-lucide-pencil" /></button>
+            <button class="cat-icon-btn danger" aria-label="Eliminar" @click="remove(c)"><UIcon name="i-lucide-trash-2" /></button>
+          </div>
         </div>
-      </template>
-    </UiBottomSheet>
+      </div>
+
+      <UiEmptyState
+        v-else-if="!isLoading"
+        icon="i-lucide-receipt-text"
+        title="Sin costos indirectos este mes"
+        :subtitle="`Agrega los CIF de ${periodLabel(period)} (alquiler, sueldos, servicios) para prorratearlos sobre las ventas.`"
+      >
+        <button v-if="!readonly" class="btn btn-primary" @click="openCreate">
+          <UIcon name="i-lucide-plus" /> Nuevo costo indirecto
+        </button>
+      </UiEmptyState>
+
+      <UiBottomSheet v-model="showForm" :title="editing ? 'Editar costo indirecto' : 'Nuevo costo indirecto'" :subtitle="periodLabel(period)">
+        <form class="cat-form" @submit.prevent="submit">
+          <label class="cat-field">
+            <span>Concepto</span>
+            <input v-model="form.concept" type="text" placeholder="Alquiler del local">
+          </label>
+          <label class="cat-field">
+            <span>Monto del mes (S/)</span>
+            <input v-model="form.amount" type="number" step="0.01" min="0" inputmode="decimal" placeholder="3500.00">
+          </label>
+        </form>
+        <template #cta="{ close }">
+          <div class="cat-cta">
+            <button class="btn btn-ghost" @click="close">Cancelar</button>
+            <button class="btn btn-primary" :disabled="busy" @click="submit">
+              <UIcon :name="busy ? 'i-lucide-loader-circle' : 'i-lucide-check'" :class="{ spin: busy }" />
+              {{ editing ? 'Guardar cambios' : 'Agregar CIF' }}
+            </button>
+          </div>
+        </template>
+      </UiBottomSheet>
+    </template>
   </div>
 </template>
 

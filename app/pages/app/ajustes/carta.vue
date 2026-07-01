@@ -6,8 +6,7 @@ useSeoMeta({ title: 'Carta — GastronomIA' })
 
 const { data: settings } = useAppSettings()
 const { data: recipes } = useRecipes()
-const update = useUpdateSettings('menu')
-const updateRecipe = useUpdateRecipe()
+const { mutateAsync: updateRecipeAsync } = useUpdateRecipe()
 const toast = useToast()
 const { user } = useUserSession()
 
@@ -30,15 +29,29 @@ const dishes = computed(() =>
 )
 const activeCount = computed(() => dishes.value.filter(d => d.active).length)
 
+// E02-2: toggle con rollback en error. La mutación invalida la caché (onSettled) tanto
+// en éxito como en fallo, lo que restablece el estado del switch al valor del backend.
+// El try/catch agrega el toast de error que faltaba.
 async function toggleDish(id: string, active: boolean): Promise<void> {
   if (readonly.value) return
-  await updateRecipe.mutateAsync({ id, active })
+  try {
+    await updateRecipeAsync({ id, active })
+  }
+  catch (error) {
+    toast.add({
+      title: errorMessage(error, 'No se pudo cambiar la disponibilidad del plato'),
+      color: 'error',
+      icon: 'i-lucide-alert-circle',
+    })
+  }
 }
+
+// E02-2: reusa useSettingsSave para garantizar feedback de éxito/error y never-hang.
+const { save: saveMenuOptions } = useSettingsSave('menu', 'Preferencias de carta guardadas')
 
 async function saveOptions(): Promise<void> {
   if (readonly.value) return
-  await update.mutateAsync({ ...form })
-  toast.add({ title: 'Preferencias de carta guardadas', icon: 'i-lucide-check' })
+  await saveMenuOptions({ ...form })
 }
 </script>
 

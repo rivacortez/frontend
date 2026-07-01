@@ -30,12 +30,24 @@ const unread = computed(() => all.value.filter(n => !n.read))
 const read = computed(() => all.value.filter(n => n.read))
 
 async function open(n: AppNotification): Promise<void> {
-  if (!n.read) await markRead.mutateAsync(n.id)
+  if (!n.read) {
+    try {
+      await markRead.mutateAsync(n.id)
+    }
+    catch (error) {
+      toast.add({ title: errorMessage(error, 'No se pudo marcar como leída'), color: 'error', icon: 'i-lucide-alert-circle' })
+    }
+  }
   if (n.actionTo) await navigateTo(n.actionTo)
 }
 
 async function markAll(): Promise<void> {
-  await markAllRead.mutateAsync()
+  try {
+    await markAllRead.mutateAsync()
+  }
+  catch (error) {
+    toast.add({ title: errorMessage(error, 'No se pudo marcar todas como leídas'), color: 'error', icon: 'i-lucide-alert-circle' })
+  }
 }
 
 // ---- HU-10-03 · Preferencias (canal in-app por tipo) ----
@@ -43,19 +55,6 @@ const showPrefs = ref(false)
 const { data: prefRows } = useNotificationPreferences()
 const setPreference = useSetPreference()
 const toast = useToast()
-
-const PREF_TYPES: { type: NotificationType, label: string, sub: string }[] = [
-  { type: 'low_stock', label: 'Stock crítico', sub: 'Insumos bajo el mínimo de reorden' },
-  { type: 'bill_requested', label: 'Cuenta solicitada', sub: 'Una mesa pidió la cuenta' },
-  { type: 'order_ready', label: 'Pedido listo', sub: 'Cocina marcó un plato como listo' },
-  { type: 'system', label: 'Sistema y recomendaciones', sub: 'Reportes, alertas IA y avisos generales' },
-]
-
-// El backend solo persiste las preferencias modificadas; ausencia = default in-app activo.
-function inAppEnabled(type: NotificationType): boolean {
-  const row = (prefRows.value ?? []).find(p => p.type === type)
-  return row ? row.inApp : true
-}
 
 async function toggleInApp(type: NotificationType, value: boolean): Promise<void> {
   try {
@@ -96,13 +95,13 @@ async function toggleInApp(type: NotificationType, value: boolean): Promise<void
     <section v-if="showPrefs" class="ntf-section ntf-prefs">
       <div class="eyebrow ntf-eyebrow">Preferencias · en la app</div>
       <div class="ntf-prefs-card">
-        <label v-for="p in PREF_TYPES" :key="p.type" class="ntf-pref-row">
+        <label v-for="p in NOTIFICATION_PREFERENCE_TYPES" :key="p.type" class="ntf-pref-row">
           <span class="ntf-pref-body">
             <span class="ntf-pref-label">{{ p.label }}</span>
-            <span class="ntf-pref-sub">{{ p.sub }}</span>
+            <span class="ntf-pref-sub">{{ p.description }}</span>
           </span>
           <USwitch
-            :model-value="inAppEnabled(p.type)"
+            :model-value="isInAppEnabled(prefRows, p.type)"
             :disabled="setPreference.isLoading.value"
             @update:model-value="(v: boolean) => toggleInApp(p.type, v)"
           />

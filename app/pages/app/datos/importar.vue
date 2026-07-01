@@ -1,27 +1,72 @@
 <script setup lang="ts">
 import type { ApiResponse } from '#shared/types/api'
-import type { Ingestion, IngestionError, IngestionStatus } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Importar ventas — GastronomIA' })
 
 const toast = useToast()
 const cache = useQueryCache()
+const { user } = useUserSession()
 
-// ============ Historial real (GET /api/ingestions) ============
-const { data: history } = useQuery({
-  key: ['ingestions'],
-  query: () => $fetch<ApiResponse<Ingestion[]>>('/api/ingestions').then(r => r.data),
+// RBAC: staff cannot import history; the backend 403s them regardless.
+// We gate the UI proactively to avoid a misleading empty/error state.
+const canManage = computed(() => user.value?.role !== 'staff')
+
+// ============ Real sales history (all time — wide date range covers full history) ============
+// The backend defaults to "today in Lima" when no from/to is passed, so we must supply
+// an explicit wide window that covers all possible historical imports (from 2000 onward).
+const HISTORY_FROM = '2000-01-01T00:00:00Z'
+const historyParams = computed(() => ({ from: HISTORY_FROM }))
+const { data: salesHistory, status: historyStatus } = useSalesHistory(historyParams)
+const historyLoading = computed(() => historyStatus.value === 'pending')
+
+/** Formats a date string as abbreviated month + 4-digit year: "Ene 2025". */
+function formatMonthYear(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString('es-PE', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'America/Lima',
+  })
+}
+
+// ============ "Estado actual" — derived from real backend data ============
+const totalRecords = computed(() => salesHistory.value?.totalQty ?? 0)
+
+/**
+ * Most-recent soldOn date formatted as a short date ("15 abr").
+ * Rows are returned desc by date, so rows[0] is the latest.
+ * Falls back to 'Sin datos' when the table is empty.
+ */
+const lastImport = computed(() => {
+  const rows = salesHistory.value?.rows
+  if (!rows?.length) return 'Sin datos'
+  return formatShortDate(rows[0].soldOn)
 })
 
-// ============ Estado actual (mock cosmético del prototipo) ============
-const currentState = {
-  lastImport: 'hace 3 días',
-  totalRecords: 1250,
-  periodStart: 'Ene 2025',
-  periodEnd: 'Abr 2026',
-  enoughData: true,
-}
+/** Earliest date in the dataset: last row of the desc-ordered array → period start. */
+const periodStart = computed(() => {
+  const rows = salesHistory.value?.rows
+  if (!rows?.length) return '—'
+  return formatMonthYear(rows[rows.length - 1].soldOn)
+})
+
+/** Latest date in the dataset: first row of the desc-ordered array → period end. */
+const periodEnd = computed(() => {
+  const rows = salesHistory.value?.rows
+  if (!rows?.length) return '—'
+  return formatMonthYear(rows[0].soldOn)
+})
+
+/** Whether there is enough data for meaningful AI forecasting (≥ 100 rows). */
+const enoughData = computed(() => totalRecords.value >= 100)
+
+/** Subtitle for the screen header — reflects loading / real data / access restriction. */
+const headerSubtitle = computed(() => {
+  if (!canManage.value) return 'Historial de ventas'
+  if (historyLoading.value) return 'Cargando datos...'
+  if (!salesHistory.value?.rows.length) return 'Sin registros'
+  return `${fmtThousands(totalRecords.value)} registros · ${lastImport.value}`
+})
 
 const requiredColumns = [
   { name: 'Fecha y hora', type: 'fecha' },
@@ -33,105 +78,136 @@ const requiredColumns = [
 
 const fmtThousands = (n: number): string => n.toLocaleString('es-PE')
 
-// ============ Flujo de importación ============
-type Phase = 'idle' | 'processing' | 'success'
+// ============ Import report shape (mirrors backend SalesImportReport DTO) ============
+interface ImportReport {
+  total: number
+  created: number
+  updated: number
+  failed: number
+  errors: { line: number; message: string }[]
+  dryRun: boolean
+}
+
+// ============ Real import flow (replaces SSE/mock approach) ============
+/**
+ * Import phases:
+ * - idle      : waiting for file pick
+ * - validating: dry-run POST in progress (spinner on button)
+ * - review    : dry-run found errors; awaiting user confirmation
+ * - importing : real POST in progress (spinner on button)
+ * - done      : import completed; shows result modal
+ */
+type Phase = 'idle' | 'validating' | 'review' | 'importing' | 'done'
 const phase = ref<Phase>('idle')
 const pickedFileName = ref('')
-const processedRows = ref(0)
-const totalRows = ref(0)
-const liveErrors = ref<IngestionError[]>([])
-const importedRows = ref(0)
+/** CSV text held between dry-run and final confirmation. */
+const pendingContent = ref('')
+const dryRunReport = ref<ImportReport | null>(null)
+const importReport = ref<ImportReport | null>(null)
+
+const isProcessing = computed(
+  () => phase.value === 'validating' || phase.value === 'importing',
+)
+
+const importMutation = useImportSalesHistory()
 
 const fileInput = ref<HTMLInputElement | null>(null)
-let eventSource: EventSource | null = null
-
-const progressPct = computed(() =>
-  totalRows.value === 0 ? 0 : Math.round((processedRows.value / totalRows.value) * 100),
-)
 
 function pickFile(): void {
   fileInput.value?.click()
 }
 
+/**
+ * Entry point when the user picks a CSV file.
+ * 1. Reads the file as text.
+ * 2. Calls the import endpoint with dryRun=true (validation only).
+ * 3a. No errors → immediately calls with dryRun=false.
+ * 3b. Has errors → transitions to 'review' so the user can confirm.
+ */
 async function onFileChosen(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  // Reset so picking the same file twice triggers change again.
   input.value = ''
   if (!file) return
 
   pickedFileName.value = file.name
-  processedRows.value = 0
-  totalRows.value = 0
-  liveErrors.value = []
-  importedRows.value = 0
-  phase.value = 'processing'
+  pendingContent.value = ''
+  dryRunReport.value = null
+  importReport.value = null
+  phase.value = 'validating'
 
+  // Step 1: read file content in the browser (no upload yet).
+  let content: string
   try {
-    const res = await $fetch<ApiResponse<Ingestion>>('/api/ingestions', {
-      method: 'POST',
-      body: {
-        fileName: file.name,
-        source: file.name.toLowerCase().endsWith('.csv') ? 'CSV' : 'Excel',
-      },
-    })
-    totalRows.value = res.data.totalRows
-    subscribe(res.data.id)
+    content = await file.text()
   }
   catch {
     phase.value = 'idle'
-    toast.add({ title: 'No pudimos iniciar la importación', icon: 'i-lucide-alert-circle' })
+    toast.add({ title: 'No se pudo leer el archivo', icon: 'i-lucide-alert-circle' })
+    return
+  }
+
+  // Step 2: dry-run — validate without writing to the database.
+  let dryReport: ImportReport
+  try {
+    dryReport = await importMutation.mutateAsync({ content, dryRun: true })
+    pendingContent.value = content
+    dryRunReport.value = dryReport
+  }
+  catch (err) {
+    phase.value = 'idle'
+    const e = err as { statusMessage?: string; data?: { message?: string } }
+    toast.add({
+      title: e?.data?.message ?? e?.statusMessage ?? 'Error al validar el archivo',
+      icon: 'i-lucide-alert-circle',
+    })
+    return
+  }
+
+  // Step 3: branch on validation result.
+  if (!dryReport.errors.length) {
+    // Clean file — skip the review step and import immediately.
+    await confirmImport(content)
+  }
+  else {
+    phase.value = 'review'
   }
 }
 
-interface ProgressPayload {
-  processedRows: number
-  totalRows: number
-  errors: IngestionError[]
-}
-interface DonePayload {
-  status: IngestionStatus
-  imported: number
-  errors: IngestionError[]
-}
-
-function parseEvent<T>(ev: Event): T {
-  return JSON.parse((ev as MessageEvent<string>).data) as T
-}
-
-function subscribe(id: string): void {
-  eventSource = new EventSource(`/api/ingestions/${id}/events`)
-
-  eventSource.addEventListener('progress', (ev) => {
-    const payload = parseEvent<ProgressPayload>(ev)
-    processedRows.value = payload.processedRows
-    totalRows.value = payload.totalRows
-    liveErrors.value = payload.errors
-  })
-
-  eventSource.addEventListener('done', (ev) => {
-    const payload = parseEvent<DonePayload>(ev)
-    importedRows.value = payload.imported
-    liveErrors.value = payload.errors
-    closeStream()
-    phase.value = 'success'
-    void cache.invalidateQueries({ key: ['ingestions'] })
-  })
-
-  eventSource.onerror = () => {
-    if (phase.value === 'processing') {
-      closeStream()
-      phase.value = 'idle'
-      toast.add({ title: 'Se perdió la conexión con la importación', icon: 'i-lucide-alert-circle' })
-    }
+/**
+ * Executes the real (non-dry-run) import.
+ * Called either automatically from `onFileChosen` (no errors) or
+ * explicitly by the user after reviewing dry-run errors.
+ *
+ * @param content - CSV text to import; defaults to `pendingContent` when omitted.
+ */
+async function confirmImport(content?: string): Promise<void> {
+  const csv = content ?? pendingContent.value
+  if (!csv) return
+  phase.value = 'importing'
+  try {
+    const report = await importMutation.mutateAsync({ content: csv, dryRun: false })
+    importReport.value = report ?? null
+    phase.value = 'done'
+    // Refresh the history card so the new totals appear without a page reload.
+    void cache.invalidateQueries({ key: ['sales-history'] })
+  }
+  catch (err) {
+    phase.value = 'idle'
+    const e = err as { statusMessage?: string; data?: { message?: string } }
+    toast.add({
+      title: e?.data?.message ?? e?.statusMessage ?? 'Error al importar el archivo',
+      icon: 'i-lucide-alert-circle',
+    })
   }
 }
 
-function closeStream(): void {
-  eventSource?.close()
-  eventSource = null
+function cancelReview(): void {
+  phase.value = 'idle'
+  pendingContent.value = ''
+  dryRunReport.value = null
 }
-
-onBeforeUnmount(closeStream)
 
 function closeSuccess(): void {
   phase.value = 'idle'
@@ -141,7 +217,7 @@ function goDashboard(): void {
   void navigateTo('/app')
 }
 
-// ============ Conectores "Pronto" ============
+// ============ Coming-soon connectors ============
 const soonSystem = ref<string | null>(null)
 
 function openComingSoon(system: string): void {
@@ -153,20 +229,7 @@ function soonUpload(): void {
   setTimeout(pickFile, 220)
 }
 
-// ============ Detalle de import histórico ============
-const detailOpen = ref(false)
-const detailItem = ref<Ingestion | null>(null)
-
-function openDetail(item: Ingestion): void {
-  detailItem.value = item
-  detailOpen.value = true
-}
-
-function fileKind(name: string): 'csv' | 'xlsx' {
-  return name.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx'
-}
-
-// ============ Formato esperado + plantilla ============
+// ============ Expected format + CSV template ============
 const formatOpen = ref(false)
 
 function downloadTemplate(): void {
@@ -195,237 +258,290 @@ function downloadTemplate(): void {
   <div class="di-page">
     <UiScreenHeader
       title="Importar ventas"
-      :subtitle="`${fmtThousands(currentState.totalRecords)} registros · ${currentState.lastImport}`"
+      :subtitle="headerSubtitle"
       back="/app/menu"
     />
 
-    <!-- ============ Banner informativo ============ -->
-    <div class="di-banner">
-      <UIcon name="i-lucide-sparkles" />
-      <span>Sube tu historial para mejorar la precisión de los pronósticos con IA.</span>
-    </div>
-
-    <!-- ============ 1. Estado actual ============ -->
-    <section class="di-section" aria-labelledby="di-state-head">
-      <div id="di-state-head" class="di-section-head">Estado actual</div>
-      <div class="di-card di-state-card">
-        <div class="di-state-row">
-          <span class="di-state-label">
-            <UIcon name="i-lucide-clock" />
-            Última importación
-          </span>
-          <span />
-          <span class="di-state-value">{{ currentState.lastImport }}</span>
-        </div>
-        <div class="di-state-row">
-          <span class="di-state-label">
-            <UIcon name="i-lucide-database" />
-            Registros totales
-          </span>
-          <span />
-          <span class="di-state-value">{{ fmtThousands(currentState.totalRecords) }} ventas</span>
-        </div>
-        <div class="di-state-row">
-          <span class="di-state-label">
-            <UIcon name="i-lucide-calendar-range" />
-            Período cubierto
-          </span>
-          <span />
-          <span class="di-state-value">{{ currentState.periodStart }} – {{ currentState.periodEnd }}</span>
-        </div>
-
-        <div v-if="currentState.enoughData" class="di-state-banner" role="status">
-          <UIcon name="i-lucide-check-circle-2" />
-          <span>Datos suficientes para pronósticos precisos.</span>
-        </div>
+    <!-- ============ RBAC: staff cannot manage imports ============ -->
+    <template v-if="!canManage">
+      <div class="di-card" style="margin: 24px 20px;">
+        <UiEmptyState
+          icon="i-lucide-lock"
+          title="Acceso restringido"
+          subtitle="La importación de historial de ventas está disponible solo para propietarios y gerentes."
+        />
       </div>
-    </section>
+    </template>
 
-    <!-- ============ 2. Nueva importación ============ -->
-    <section class="di-section" aria-labelledby="di-new-head">
-      <div id="di-new-head" class="di-section-head">Nueva importación</div>
-      <div class="di-primary">
-        <div class="di-primary-head">
-          <span class="di-primary-icon" aria-hidden="true">
-            <UIcon name="i-lucide-bar-chart-3" />
+    <template v-else>
+      <!-- ============ Banner informativo ============ -->
+      <div class="di-banner">
+        <UIcon name="i-lucide-sparkles" />
+        <span>Sube tu historial para mejorar la precisión de los pronósticos con IA.</span>
+      </div>
+
+      <!-- ============ 1. Estado actual ============ -->
+      <section class="di-section" aria-labelledby="di-state-head">
+        <div id="di-state-head" class="di-section-head">Estado actual</div>
+        <div class="di-card di-state-card">
+          <div class="di-state-row">
+            <span class="di-state-label">
+              <UIcon name="i-lucide-clock" />
+              Última importación
+            </span>
+            <span />
+            <span class="di-state-value">{{ historyLoading ? '—' : lastImport }}</span>
+          </div>
+          <div class="di-state-row">
+            <span class="di-state-label">
+              <UIcon name="i-lucide-database" />
+              Registros totales
+            </span>
+            <span />
+            <span class="di-state-value">
+              {{ historyLoading ? '—' : `${fmtThousands(totalRecords)} ventas` }}
+            </span>
+          </div>
+          <div class="di-state-row">
+            <span class="di-state-label">
+              <UIcon name="i-lucide-calendar-range" />
+              Período cubierto
+            </span>
+            <span />
+            <span class="di-state-value">
+              {{ historyLoading ? '—' : `${periodStart} – ${periodEnd}` }}
+            </span>
+          </div>
+
+          <div v-if="!historyLoading && enoughData" class="di-state-banner" role="status">
+            <UIcon name="i-lucide-check-circle-2" />
+            <span>Datos suficientes para pronósticos precisos.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 2. Nueva importación ============ -->
+      <section class="di-section" aria-labelledby="di-new-head">
+        <div id="di-new-head" class="di-section-head">Nueva importación</div>
+        <div class="di-primary">
+          <div class="di-primary-head">
+            <span class="di-primary-icon" aria-hidden="true">
+              <UIcon name="i-lucide-bar-chart-3" />
+            </span>
+            <div class="di-primary-text">
+              <div class="di-primary-title">Importar nuevo archivo</div>
+              <div class="di-primary-sub">Excel, CSV o conexión directa con tu sistema actual.</div>
+            </div>
+          </div>
+
+          <div class="di-sources" role="list">
+            <button type="button" class="di-source primary" role="listitem" :disabled="isProcessing" @click="pickFile">
+              <span class="di-source-ico">
+                <UIcon name="i-lucide-file-spreadsheet" />
+              </span>
+              <span class="di-source-body">
+                <span class="di-source-title">Subir archivo Excel o CSV</span>
+                <span class="di-source-sub">.xlsx, .xls, .csv hasta 10 MB</span>
+              </span>
+              <UIcon name="i-lucide-chevron-right" class="di-source-chev" />
+            </button>
+
+            <button type="button" class="di-source" role="listitem" @click="openComingSoon('TumiSoft')">
+              <span class="di-source-ico">
+                <UIcon name="i-lucide-plug-zap" />
+              </span>
+              <span class="di-source-body">
+                <span class="di-source-title">
+                  Conectar con TumiSoft
+                  <span class="di-source-pill">Pronto</span>
+                </span>
+                <span class="di-source-sub">Sincronización automática diaria</span>
+              </span>
+              <UIcon name="i-lucide-chevron-right" class="di-source-chev" />
+            </button>
+
+            <button type="button" class="di-source" role="listitem" @click="openComingSoon('Conexa')">
+              <span class="di-source-ico">
+                <UIcon name="i-lucide-plug-zap" />
+              </span>
+              <span class="di-source-body">
+                <span class="di-source-title">
+                  Conectar con Conexa
+                  <span class="di-source-pill">Pronto</span>
+                </span>
+                <span class="di-source-sub">Sincronización automática diaria</span>
+              </span>
+              <UIcon name="i-lucide-chevron-right" class="di-source-chev" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="di-cta"
+            :disabled="isProcessing"
+            @click="pickFile"
+          >
+            <UIcon
+              :name="isProcessing ? 'i-lucide-loader-2' : 'i-lucide-upload'"
+              :class="{ spin: isProcessing }"
+            />
+            <span>
+              {{
+                phase === 'validating' ? 'Validando archivo...'
+                : phase === 'importing' ? 'Importando...'
+                : 'Seleccionar archivo'
+              }}
+            </span>
+            <UIcon v-if="!isProcessing" name="i-lucide-arrow-right" />
+          </button>
+
+          <input
+            ref="fileInput"
+            type="file"
+            accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+            class="di-file-input"
+            @change="onFileChosen"
+          >
+        </div>
+      </section>
+
+      <!-- ============ 3. Importaciones recientes ============ -->
+      <section class="di-section" aria-labelledby="di-recent-head">
+        <div id="di-recent-head" class="di-section-head">
+          Importaciones recientes
+          <span v-if="salesHistory?.totalQty" class="di-section-count">
+            {{ fmtThousands(salesHistory.totalQty) }} registros
           </span>
-          <div class="di-primary-text">
-            <div class="di-primary-title">Importar nuevo archivo</div>
-            <div class="di-primary-sub">Excel, CSV o conexión directa con tu sistema actual.</div>
+        </div>
+
+        <!-- Loading skeleton -->
+        <div v-if="historyLoading" class="di-card di-empty" aria-busy="true">
+          <UiEmptyState
+            icon="i-lucide-loader-2"
+            title="Cargando historial..."
+            subtitle="Consultando el historial de ventas."
+          />
+        </div>
+
+        <!-- Aggregate summary when data exists -->
+        <div v-else-if="salesHistory?.totalQty" class="di-card di-imports">
+          <div class="di-import di-import-readonly">
+            <span class="di-import-ico">
+              <UIcon name="i-lucide-database" />
+            </span>
+            <span class="di-import-body">
+              <span class="di-import-name">Historial de ventas</span>
+              <span class="di-import-meta">
+                <span>{{ fmtThousands(salesHistory.totalQty) }} registros</span>
+                <span class="dot">·</span>
+                <!-- Use periodStart/End (derived from actual row dates), not from/to
+                     which reflect the wide query range rather than real data boundaries. -->
+                <span>{{ periodStart }} – {{ periodEnd }}</span>
+              </span>
+            </span>
+            <span class="di-import-status" aria-label="Datos disponibles">
+              <UIcon name="i-lucide-check" />
+            </span>
           </div>
         </div>
 
-        <div class="di-sources" role="list">
-          <button type="button" class="di-source primary" role="listitem" @click="pickFile">
-            <span class="di-source-ico">
-              <UIcon name="i-lucide-file-spreadsheet" />
-            </span>
-            <span class="di-source-body">
-              <span class="di-source-title">Subir archivo Excel o CSV</span>
-              <span class="di-source-sub">.xlsx, .xls, .csv hasta 10 MB</span>
-            </span>
-            <UIcon name="i-lucide-chevron-right" class="di-source-chev" />
-          </button>
-
-          <button type="button" class="di-source" role="listitem" @click="openComingSoon('TumiSoft')">
-            <span class="di-source-ico">
-              <UIcon name="i-lucide-plug-zap" />
-            </span>
-            <span class="di-source-body">
-              <span class="di-source-title">
-                Conectar con TumiSoft
-                <span class="di-source-pill">Pronto</span>
-              </span>
-              <span class="di-source-sub">Sincronización automática diaria</span>
-            </span>
-            <UIcon name="i-lucide-chevron-right" class="di-source-chev" />
-          </button>
-
-          <button type="button" class="di-source" role="listitem" @click="openComingSoon('Conexa')">
-            <span class="di-source-ico">
-              <UIcon name="i-lucide-plug-zap" />
-            </span>
-            <span class="di-source-body">
-              <span class="di-source-title">
-                Conectar con Conexa
-                <span class="di-source-pill">Pronto</span>
-              </span>
-              <span class="di-source-sub">Sincronización automática diaria</span>
-            </span>
-            <UIcon name="i-lucide-chevron-right" class="di-source-chev" />
-          </button>
+        <!-- Empty state -->
+        <div v-else class="di-card di-empty">
+          <UiEmptyState
+            icon="i-lucide-file-spreadsheet"
+            title="Sin importaciones aún"
+            subtitle="Sube tu primer archivo para entrenar los pronósticos con tu historial."
+          />
         </div>
+      </section>
 
-        <button type="button" class="di-cta" @click="pickFile">
-          <UIcon name="i-lucide-upload" />
-          <span>Seleccionar archivo</span>
-          <UIcon name="i-lucide-arrow-right" />
-        </button>
-
-        <input
-          ref="fileInput"
-          type="file"
-          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-          class="di-file-input"
-          @change="onFileChosen"
-        >
-      </div>
-    </section>
-
-    <!-- ============ 3. Importaciones recientes ============ -->
-    <section class="di-section" aria-labelledby="di-recent-head">
-      <div id="di-recent-head" class="di-section-head">
-        Importaciones recientes
-        <span v-if="history?.length" class="di-section-count">{{ history.length }} archivos</span>
-      </div>
-
-      <div v-if="history?.length" class="di-card di-imports">
-        <button
-          v-for="item in history"
-          :key="item.id"
-          type="button"
-          class="di-import"
-          @click="openDetail(item)"
-        >
-          <span class="di-import-ico" :class="fileKind(item.fileName)">
-            <UIcon name="i-lucide-file-spreadsheet" />
-          </span>
-          <span class="di-import-body">
-            <span class="di-import-name">{{ item.fileName }}</span>
-            <span class="di-import-meta">
-              <span>{{ fmtThousands(item.totalRows) }} registros</span>
-              <span class="dot">·</span>
-              <span>{{ formatShortDate(item.createdAt) }}</span>
-              <template v-if="item.errors.length">
-                <span class="dot">·</span>
-                <span class="warn">{{ item.errors.length }} errores</span>
-              </template>
-            </span>
-          </span>
-          <span class="di-import-status" aria-label="Importado correctamente">
-            <UIcon name="i-lucide-check" />
-          </span>
-          <UIcon name="i-lucide-chevron-right" class="di-import-chev" />
-        </button>
-      </div>
-
-      <div v-else class="di-card di-empty">
-        <UiEmptyState
-          icon="i-lucide-file-spreadsheet"
-          title="Sin importaciones aún"
-          subtitle="Sube tu primer archivo para entrenar los pronósticos con tu historial."
-        />
-      </div>
-    </section>
-
-    <!-- ============ 4. Formato esperado ============ -->
-    <section class="di-section" aria-labelledby="di-format-head">
-      <div id="di-format-head" class="di-section-head">Formato del archivo</div>
-      <div class="di-card di-format-card">
-        <button
-          type="button"
-          class="di-format-toggle"
-          :aria-expanded="formatOpen"
-          aria-controls="di-format-body"
-          @click="formatOpen = !formatOpen"
-        >
-          <UIcon name="i-lucide-help-circle" class="lead" />
-          <span class="di-format-toggle-text">¿Qué columnas necesita mi archivo?</span>
-          <UIcon name="i-lucide-chevron-down" class="chev" />
-        </button>
-        <div id="di-format-body" class="di-format-body" :class="{ open: formatOpen }">
-          <div class="di-format-inner">
-            <div class="di-format-inner-pad">
-              <ul class="di-columns">
-                <li v-for="(col, i) in requiredColumns" :key="col.name" class="di-column">
-                  <span class="di-col-num">{{ i + 1 }}</span>
-                  <span class="di-col-name">{{ col.name }}</span>
-                  <span class="di-col-type">{{ col.type }}</span>
-                </li>
-              </ul>
-              <button type="button" class="di-template-btn" @click="downloadTemplate">
-                <UIcon name="i-lucide-download" />
-                <span>Descargar plantilla CSV</span>
-              </button>
+      <!-- ============ 4. Formato esperado ============ -->
+      <section class="di-section" aria-labelledby="di-format-head">
+        <div id="di-format-head" class="di-section-head">Formato del archivo</div>
+        <div class="di-card di-format-card">
+          <button
+            type="button"
+            class="di-format-toggle"
+            :aria-expanded="formatOpen"
+            aria-controls="di-format-body"
+            @click="formatOpen = !formatOpen"
+          >
+            <UIcon name="i-lucide-help-circle" class="lead" />
+            <span class="di-format-toggle-text">¿Qué columnas necesita mi archivo?</span>
+            <UIcon name="i-lucide-chevron-down" class="chev" />
+          </button>
+          <div id="di-format-body" class="di-format-body" :class="{ open: formatOpen }">
+            <div class="di-format-inner">
+              <div class="di-format-inner-pad">
+                <ul class="di-columns">
+                  <li v-for="(col, i) in requiredColumns" :key="col.name" class="di-column">
+                    <span class="di-col-num">{{ i + 1 }}</span>
+                    <span class="di-col-name">{{ col.name }}</span>
+                    <span class="di-col-type">{{ col.type }}</span>
+                  </li>
+                </ul>
+                <button type="button" class="di-template-btn" @click="downloadTemplate">
+                  <UIcon name="i-lucide-download" />
+                  <span>Descargar plantilla CSV</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </template>
 
-    <!-- ============ Overlay de progreso (SSE en vivo) ============ -->
-    <div v-if="phase === 'processing'" class="di-overlay" role="status" aria-live="polite" aria-busy="true">
-      <div class="di-loading-card">
-        <div class="di-loading-icon" aria-hidden="true">
-          <UIcon name="i-lucide-file-spreadsheet" />
+    <!-- ============ Overlay: dry-run review (errors found) ============ -->
+    <div
+      v-if="phase === 'review'"
+      class="di-overlay"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="di-review-title"
+      @click.self="cancelReview"
+    >
+      <div class="di-modal">
+        <div class="di-success-icon di-warn-icon" aria-hidden="true">
+          <UIcon name="i-lucide-alert-triangle" />
         </div>
-        <div class="di-loading-title">Procesando tu archivo</div>
-        <div class="di-loading-sub">Leyendo ventas y reconociendo platos.</div>
+        <h2 id="di-review-title" class="di-modal-title">Se encontraron errores</h2>
+        <p class="di-modal-text">
+          Hay <b>{{ dryRunReport?.errors.length }}</b>
+          fila{{ (dryRunReport?.errors.length ?? 0) === 1 ? '' : 's' }} con error.
+          Las filas válidas se importarán de todas formas si confirmás.
+        </p>
 
-        <div class="di-loading-bar" aria-hidden="true">
-          <div class="di-loading-bar-fill" :style="{ width: `${progressPct}%` }" />
-        </div>
-        <div class="di-loading-counter">
-          <span>{{ fmtThousands(processedRows) }} / {{ fmtThousands(totalRows) }} filas</span>
-          <span>{{ progressPct }} %</span>
-        </div>
-
-        <div v-if="liveErrors.length" class="di-live-errors" aria-label="Errores detectados">
-          <div v-for="err in liveErrors" :key="`${err.row}-${err.field}`" class="di-live-error">
-            <UIcon name="i-lucide-alert-circle" />
-            <span><b>Fila {{ err.row }}</b> · {{ err.field }}: {{ err.message }}</span>
+        <div v-if="dryRunReport?.errors.length" class="di-err-list" aria-label="Errores detectados">
+          <div
+            v-for="err in dryRunReport.errors.slice(0, 10)"
+            :key="err.line"
+            class="di-err-row"
+          >
+            <span class="di-err-num">Línea {{ err.line }}</span>
+            <span />
+            <span class="di-err-msg">{{ err.message }}</span>
           </div>
+          <p v-if="(dryRunReport?.errors.length ?? 0) > 10" class="di-err-more">
+            +{{ (dryRunReport?.errors.length ?? 0) - 10 }} errores más
+          </p>
         </div>
 
-        <div class="di-loading-file">
-          <UIcon name="i-lucide-file" />
-          <b>{{ pickedFileName }}</b>
+        <div class="di-success-meta">
+          <UIcon name="i-lucide-file-spreadsheet" />
+          <span><b>{{ pickedFileName }}</b></span>
+        </div>
+
+        <div class="di-modal-actions">
+          <button class="btn btn-ghost" @click="cancelReview">Cancelar</button>
+          <button class="btn btn-primary" @click="confirmImport()">
+            <UIcon name="i-lucide-check" /> Confirmar importación
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- ============ Modal de resumen final ============ -->
-    <div v-if="phase === 'success'" class="di-overlay" @click.self="closeSuccess">
+    <!-- ============ Overlay: import result (done) ============ -->
+    <div v-if="phase === 'done'" class="di-overlay" @click.self="closeSuccess">
       <div class="di-modal" role="dialog" aria-modal="true" aria-label="Importación completa">
         <div class="di-success-icon" aria-hidden="true">
           <UIcon name="i-lucide-check-circle-2" />
@@ -437,26 +553,32 @@ function downloadTemplate(): void {
 
         <div class="di-success-stats">
           <div class="di-success-stat">
-            <div class="di-success-stat-num">{{ fmtThousands(importedRows) }}<small> filas</small></div>
+            <div class="di-success-stat-num">
+              {{ fmtThousands((importReport?.created ?? 0) + (importReport?.updated ?? 0)) }}<small> filas</small>
+            </div>
             <div class="di-success-stat-label">importadas</div>
           </div>
           <div class="di-success-stat">
-            <div class="di-success-stat-num">{{ liveErrors.length }}<small> filas</small></div>
+            <div class="di-success-stat-num">{{ importReport?.failed ?? 0 }}<small> filas</small></div>
             <div class="di-success-stat-label">con error</div>
           </div>
         </div>
 
-        <div v-if="liveErrors.length" class="di-err-list" aria-label="Detalle de errores">
-          <div v-for="err in liveErrors" :key="`${err.row}-${err.field}`" class="di-err-row">
-            <span class="di-err-num">Fila {{ err.row }}</span>
-            <span class="di-err-field">{{ err.field }}</span>
+        <div v-if="importReport?.errors.length" class="di-err-list" aria-label="Detalle de errores">
+          <div
+            v-for="err in importReport.errors"
+            :key="err.line"
+            class="di-err-row"
+          >
+            <span class="di-err-num">Línea {{ err.line }}</span>
+            <span />
             <span class="di-err-msg">{{ err.message }}</span>
           </div>
         </div>
 
         <div class="di-success-meta">
           <UIcon name="i-lucide-file-spreadsheet" />
-          <span><b>{{ pickedFileName }}</b> · {{ fmtThousands(totalRows) }} filas leídas</span>
+          <span><b>{{ pickedFileName }}</b> · {{ fmtThousands(importReport?.total ?? 0) }} filas leídas</span>
         </div>
 
         <div class="di-modal-actions">
@@ -468,7 +590,7 @@ function downloadTemplate(): void {
       </div>
     </div>
 
-    <!-- ============ Modal conector próximamente ============ -->
+    <!-- ============ Overlay: connector coming soon ============ -->
     <div v-if="soonSystem" class="di-overlay" @click.self="soonSystem = null">
       <div class="di-modal center" role="dialog" aria-modal="true" aria-label="Conector próximamente">
         <div class="di-soon-icon" aria-hidden="true">
@@ -492,69 +614,6 @@ function downloadTemplate(): void {
         </div>
       </div>
     </div>
-
-    <!-- ============ Sheet detalle de import ============ -->
-    <UiBottomSheet
-      v-model="detailOpen"
-      title="Detalle del import"
-      :subtitle="detailItem ? `Origen: ${detailItem.source} · ${timeAgo(detailItem.createdAt)}` : undefined"
-    >
-      <template v-if="detailItem">
-        <div class="di-detail-hero">
-          <span class="di-detail-hero-ico">
-            <UIcon name="i-lucide-file-spreadsheet" />
-          </span>
-          <div class="di-detail-hero-body">
-            <div class="di-detail-hero-name">{{ detailItem.fileName }}</div>
-            <div class="di-detail-hero-date">{{ formatShortDate(detailItem.createdAt) }} · {{ formatTime(detailItem.createdAt) }}</div>
-          </div>
-          <span class="di-import-status" aria-label="Importado correctamente">
-            <UIcon name="i-lucide-check" />
-          </span>
-        </div>
-
-        <div class="di-detail-grid">
-          <div class="di-detail-stat">
-            <div class="di-detail-stat-label">Registros</div>
-            <div class="di-detail-stat-value">{{ fmtThousands(detailItem.totalRows) }}</div>
-          </div>
-          <div class="di-detail-stat">
-            <div class="di-detail-stat-label">Filas con error</div>
-            <div class="di-detail-stat-value">{{ detailItem.errors.length }}</div>
-          </div>
-          <div class="di-detail-stat span-2">
-            <div class="di-detail-stat-label">Fuente</div>
-            <div class="di-detail-stat-value sm">{{ detailItem.source }}</div>
-          </div>
-        </div>
-
-        <div v-if="detailItem.errors.length" class="di-err-list in-sheet" aria-label="Errores del import">
-          <div v-for="err in detailItem.errors" :key="`${err.row}-${err.field}`" class="di-err-row">
-            <span class="di-err-num">Fila {{ err.row }}</span>
-            <span class="di-err-field">{{ err.field }}</span>
-            <span class="di-err-msg">{{ err.message }}</span>
-          </div>
-        </div>
-
-        <div class="di-detail-placeholder">
-          <UIcon name="i-lucide-info" />
-          <span>
-            Pronto vas a poder ver el desglose por plato y descargar el archivo original. Por ahora la información es solo de referencia.
-          </span>
-        </div>
-      </template>
-      <template #cta="{ close }">
-        <div class="di-modal-actions">
-          <button class="btn btn-ghost" @click="close">Cerrar</button>
-          <button
-            class="btn btn-primary"
-            @click="toast.add({ title: 'Descarga del archivo original — próximamente', icon: 'i-lucide-download' })"
-          >
-            <UIcon name="i-lucide-download" /> Descargar original
-          </button>
-        </div>
-      </template>
-    </UiBottomSheet>
   </div>
 </template>
 
@@ -708,6 +767,7 @@ function downloadTemplate(): void {
   border-color: var(--terracotta);
   box-shadow: 0 0 0 2px rgba(201, 106, 67, 0.10);
 }
+.di-source:disabled { opacity: 0.6; cursor: not-allowed; }
 .di-source-ico {
   width: 36px; height: 36px;
   border-radius: 9px;
@@ -759,8 +819,9 @@ function downloadTemplate(): void {
   transition: background var(--dur-fast);
   width: 100%;
 }
-.di-cta:hover { background: var(--terracotta-700); border-color: var(--terracotta-700); }
-.di-cta:active { transform: scale(0.99); }
+.di-cta:hover:not(:disabled) { background: var(--terracotta-700); border-color: var(--terracotta-700); }
+.di-cta:active:not(:disabled) { transform: scale(0.99); }
+.di-cta:disabled { opacity: 0.7; cursor: not-allowed; }
 .di-cta .iconify { width: 16px; height: 16px; }
 
 .di-file-input { display: none; }
@@ -777,14 +838,12 @@ function downloadTemplate(): void {
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 12px;
-  cursor: pointer;
   font: inherit;
   text-align: left;
   color: inherit;
-  transition: background var(--dur);
 }
 .di-import:last-child { border-bottom: none; }
-.di-import:hover { background: var(--crema-100); }
+.di-import-readonly { cursor: default; }
 .di-import-ico {
   width: 36px; height: 36px;
   border-radius: 9px;
@@ -795,8 +854,6 @@ function downloadTemplate(): void {
   flex-shrink: 0;
 }
 .di-import-ico .iconify { width: 17px; height: 17px; }
-.di-import-ico.xlsx { color: var(--oliva-700); background: var(--oliva-100); border-color: transparent; }
-.di-import-ico.csv { color: var(--mostaza-700); background: var(--mostaza-100); border-color: transparent; }
 .di-import-body { min-width: 0; }
 .di-import-name {
   display: block;
@@ -814,7 +871,6 @@ function downloadTemplate(): void {
   flex-wrap: wrap;
 }
 .di-import-meta .dot { color: var(--border); }
-.di-import-meta .warn { color: var(--mostaza-700); font-weight: 600; }
 .di-import-status {
   width: 22px; height: 22px;
   border-radius: 50%;
@@ -824,7 +880,6 @@ function downloadTemplate(): void {
   flex-shrink: 0;
 }
 .di-import-status .iconify { width: 13px; height: 13px; }
-.di-import-chev { width: 16px; height: 16px; color: var(--fg3); flex-shrink: 0; }
 .di-empty { padding: 8px 0; }
 
 /* ============ Formato esperado ============ */
@@ -932,107 +987,6 @@ function downloadTemplate(): void {
 }
 @keyframes diOvIn { to { opacity: 1; } }
 
-/* ============ Card de progreso ============ */
-.di-loading-card {
-  width: 100%;
-  max-width: 340px;
-  background: var(--crema-100);
-  border-radius: 16px;
-  padding: 24px 20px 22px;
-  text-align: center;
-  box-shadow: 0 20px 50px rgba(26, 26, 26, 0.30);
-  animation: diPop 280ms var(--ease-emphasis) both;
-}
-@keyframes diPop {
-  from { opacity: 0; transform: scale(0.94); }
-  to { opacity: 1; transform: scale(1); }
-}
-.di-loading-icon {
-  width: 56px; height: 56px;
-  border-radius: 14px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  color: var(--terracotta-700);
-  margin: 0 auto 14px;
-  display: inline-flex; align-items: center; justify-content: center;
-  position: relative;
-  overflow: hidden;
-}
-.di-loading-icon .iconify { width: 26px; height: 26px; }
-.di-loading-icon::after {
-  content: '';
-  position: absolute; left: 0; right: 0; bottom: 0;
-  height: 3px;
-  background: linear-gradient(to right, transparent, var(--terracotta), transparent);
-  animation: diScan 1400ms ease-in-out infinite;
-}
-@keyframes diScan {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-.di-loading-title { font-size: 16px; font-weight: 600; color: var(--fg1); margin: 0 0 4px; }
-.di-loading-sub {
-  font-size: 12.5px;
-  color: var(--fg2);
-  margin: 0 0 14px;
-  line-height: 1.4;
-}
-.di-loading-bar {
-  height: 6px;
-  background: var(--crema-200);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.di-loading-bar-fill {
-  height: 100%;
-  background: var(--terracotta);
-  border-radius: 999px;
-  transition: width 320ms var(--ease-standard);
-}
-.di-loading-counter {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-top: 8px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg2);
-  font-variant-numeric: tabular-nums;
-}
-.di-live-errors {
-  margin-top: 12px;
-  display: flex; flex-direction: column; gap: 6px;
-  max-height: 110px;
-  overflow-y: auto;
-  text-align: left;
-}
-.di-live-error {
-  display: flex; align-items: flex-start; gap: 6px;
-  padding: 7px 9px;
-  background: var(--danger-bg);
-  border-radius: 8px;
-  font-size: 11.5px;
-  color: var(--fg2);
-  line-height: 1.35;
-}
-.di-live-error .iconify { width: 13px; height: 13px; color: var(--danger); flex-shrink: 0; margin-top: 1px; }
-.di-live-error b { color: var(--fg1); font-weight: 600; font-variant-numeric: tabular-nums; }
-.di-loading-file {
-  display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 14px;
-  padding: 6px 10px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--fg2);
-  max-width: 100%;
-}
-.di-loading-file .iconify { width: 13px; height: 13px; color: var(--oliva-700); flex-shrink: 0; }
-.di-loading-file b {
-  color: var(--fg1); font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  min-width: 0;
-}
-
 /* ============ Modales ============ */
 .di-modal {
   width: 100%;
@@ -1045,6 +999,10 @@ function downloadTemplate(): void {
   animation: diPop 280ms var(--ease-emphasis) both;
   max-height: 86dvh;
   overflow-y: auto;
+}
+@keyframes diPop {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
 }
 .di-modal-title {
   font-size: 19px; font-weight: 600;
@@ -1072,6 +1030,10 @@ function downloadTemplate(): void {
   display: inline-flex; align-items: center; justify-content: center;
   margin-bottom: 14px;
   animation: diPopBig 480ms var(--ease-emphasis) both;
+}
+.di-warn-icon {
+  background: var(--mostaza-100);
+  color: var(--mostaza-700);
 }
 @keyframes diPopBig {
   0% { transform: scale(0.5); opacity: 0; }
@@ -1121,10 +1083,9 @@ function downloadTemplate(): void {
   display: flex; flex-direction: column; gap: 6px;
   margin-bottom: 14px;
 }
-.di-err-list.in-sheet { margin-top: 2px; }
 .di-err-row {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto 1px 1fr;
   align-items: baseline;
   gap: 8px;
   padding: 8px 10px;
@@ -1141,15 +1102,13 @@ function downloadTemplate(): void {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.di-err-field {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--terracotta-700);
-  background: var(--terracotta-100);
-  padding: 1px 6px;
-  border-radius: 5px;
-}
 .di-err-msg { color: var(--fg2); line-height: 1.35; }
+.di-err-more {
+  font-size: 11px;
+  color: var(--fg3);
+  text-align: center;
+  margin: 2px 0 0;
+}
 
 .di-soon-icon {
   width: 52px; height: 52px;
@@ -1173,70 +1132,15 @@ function downloadTemplate(): void {
 .di-soon-tip .iconify { width: 15px; height: 15px; color: var(--terracotta-700); flex-shrink: 0; margin-top: 1px; }
 .di-soon-tip b { color: var(--fg1); font-weight: 600; }
 
-/* ============ Sheet detalle ============ */
-.di-detail-hero {
-  display: flex; align-items: center; gap: 14px;
-  padding: 14px;
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  margin: 4px 0 14px;
+/* ============ Spinner animation ============ */
+.spin { animation: spinAnim 0.9s linear infinite; }
+@keyframes spinAnim { to { transform: rotate(360deg); } }
+
+/* Reduce animation for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+  .di-overlay { animation: none; opacity: 1; }
+  .di-modal { animation: none; }
+  .di-success-icon { animation: none; }
 }
-.di-detail-hero-ico {
-  width: 44px; height: 44px;
-  border-radius: 11px;
-  background: var(--crema-100);
-  border: 1px solid var(--border-subtle);
-  color: var(--oliva-700);
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.di-detail-hero-ico .iconify { width: 22px; height: 22px; }
-.di-detail-hero-body { flex: 1; min-width: 0; }
-.di-detail-hero-name {
-  font-size: 14px; font-weight: 600;
-  color: var(--fg1);
-  line-height: 1.2;
-  word-break: break-word;
-}
-.di-detail-hero-date { font-size: 11.5px; color: var(--fg3); margin-top: 2px; }
-.di-detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.di-detail-stat {
-  background: var(--pure-white);
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-.di-detail-stat.span-2 { grid-column: 1 / -1; }
-.di-detail-stat-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--fg3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.di-detail-stat-value {
-  font-size: 15px; font-weight: 600;
-  color: var(--fg1);
-  margin-top: 4px;
-  font-variant-numeric: tabular-nums;
-}
-.di-detail-stat-value.sm { font-size: 14px; }
-.di-detail-placeholder {
-  padding: 14px;
-  background: var(--crema-200);
-  border-radius: 10px;
-  border: 1px dashed var(--border);
-  font-size: 12.5px;
-  color: var(--fg3);
-  display: flex; align-items: flex-start; gap: 10px;
-  line-height: 1.45;
-  margin-bottom: 4px;
-}
-.di-detail-placeholder .iconify { width: 15px; height: 15px; color: var(--fg3); flex-shrink: 0; margin-top: 1px; }
 </style>

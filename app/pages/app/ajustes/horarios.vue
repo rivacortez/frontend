@@ -5,7 +5,7 @@ definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Horarios — GastronomIA' })
 
 const { data: settings } = useAppSettings()
-const update = useUpdateSettings('hours')
+const { save: persist, saving } = useSettingsSave('hours', 'Horarios guardados')
 const toast = useToast()
 const { user } = useUserSession()
 
@@ -17,18 +17,11 @@ watch(settings, (s) => {
   if (s) days.value = s.hours.days.map(d => ({ ...d }))
 }, { immediate: true })
 
-const saving = ref(false)
-
+// `useSettingsSave` confirma en 2xx y muestra el error en 4xx/5xx (fix E01-2),
+// dejando el botón habilitado para reintentar.
 async function save(): Promise<void> {
-  if (readonly.value || saving.value) return
-  saving.value = true
-  try {
-    await update.mutateAsync({ days: days.value })
-    toast.add({ title: 'Horarios guardados', icon: 'i-lucide-check' })
-  }
-  finally {
-    saving.value = false
-  }
+  if (readonly.value) return
+  await persist({ days: days.value })
 }
 
 function copyToAll(source: DayHours): void {

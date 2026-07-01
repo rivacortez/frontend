@@ -9,6 +9,8 @@ const patchRecipeSchema = z.object({
   sellPrice: z.number().nonnegative().optional(),
   items: z.array(z.object({
     ingredientId: z.string(),
+    /** Presente cuando el ítem es una sub-receta; mutuamente excluyente con ingredientId. */
+    subRecipeId: z.string().optional(),
     name: z.string(),
     qty: z.number().positive(),
     unit: z.string(),
