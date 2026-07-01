@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { onClickOutside, useEventListener } from '@vueuse/core'
+
 // Topbar única del shell: vive en el layout, así cubre TODAS las vistas. El
 // título sale del header declarado por la página (definePageHeader / ScreenHeader)
 // y cae al título de ruta si la vista no declara nada. Las acciones contextuales
@@ -26,6 +28,36 @@ function goBack(): void {
   if (hasInAppHistory) router.back()
   else void navigateTo(ph.value.back ?? '/app')
 }
+
+// ---- Notification popover ------------------------------------------------
+// `anchorRef` wraps the bell button + panel so that onClickOutside treats
+// clicks on the bell itself as "inside" and doesn't immediately re-close.
+const panelOpen = ref(false)
+const anchorRef = ref<HTMLElement | null>(null)
+const bellButtonRef = ref<HTMLButtonElement | null>(null)
+
+/**
+ * Close the panel and return keyboard focus to the bell button.
+ * Called by: Escape key, and `close` events from inside the panel (item
+ * clicks, "Ver todas"). NOT called on click-outside — user clicked elsewhere.
+ */
+function closePanelAndFocus(): void {
+  panelOpen.value = false
+  bellButtonRef.value?.focus()
+}
+
+// Close when the user clicks anywhere outside the anchor (bell button + panel).
+onClickOutside(anchorRef, () => {
+  panelOpen.value = false
+})
+
+// Close on Escape and return focus to the bell (standard keyboard flow).
+useEventListener('keydown', (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && panelOpen.value) {
+    e.stopPropagation()
+    closePanelAndFocus()
+  }
+})
 </script>
 
 <template>
@@ -70,16 +102,34 @@ function goBack(): void {
           </button>
         </template>
       </ClientOnly>
-      <NuxtLink
-        to="/app/notificaciones"
-        class="tb-icon"
-        :aria-label="unreadCount > 0 ? `Notificaciones, ${unreadCount} sin leer` : 'Notificaciones'"
-      >
-        <UIcon name="i-lucide-bell" class="tb-icon-glyph" />
-        <ClientOnly>
-          <span v-if="unreadCount > 0" class="tb-badge" aria-hidden="true">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
-        </ClientOnly>
-      </NuxtLink>
+
+      <!--
+        Bell button + notification panel. Wrapped in a single anchor element so
+        onClickOutside can treat both as "inside" — clicking the bell to close
+        the panel doesn't fire an outside click first.
+      -->
+      <div ref="anchorRef" class="tb-notif-anchor">
+        <button
+          ref="bellButtonRef"
+          type="button"
+          class="tb-icon"
+          :aria-label="unreadCount > 0 ? `Notificaciones, ${unreadCount} sin leer` : 'Notificaciones'"
+          aria-haspopup="dialog"
+          :aria-expanded="panelOpen"
+          @click="panelOpen = !panelOpen"
+        >
+          <UIcon name="i-lucide-bell" class="tb-icon-glyph" />
+          <ClientOnly>
+            <span v-if="unreadCount > 0" class="tb-badge" aria-hidden="true">
+              {{ unreadCount > 9 ? '9+' : unreadCount }}
+            </span>
+          </ClientOnly>
+        </button>
+
+        <!-- Notification popover panel -->
+        <NavNotificationPanel :open="panelOpen" @close="closePanelAndFocus" />
+      </div>
+
       <NuxtLink to="/app/ajustes" class="tb-icon" aria-label="Ajustes del negocio">
         <UIcon name="i-lucide-settings" class="tb-icon-glyph" />
       </NuxtLink>
@@ -148,5 +198,12 @@ function goBack(): void {
   font-size: 11px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center;
   border: 2px solid var(--bg);
+}
+
+/* Anchor wrapper for bell + panel. `position: relative` so the panel
+   can use `position: absolute` to anchor below the bell. No overflow
+   clipping so the panel escapes the topbar's bounding box. */
+.tb-notif-anchor {
+  position: relative;
 }
 </style>

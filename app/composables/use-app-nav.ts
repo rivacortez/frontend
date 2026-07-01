@@ -138,6 +138,25 @@ export function useAppNavSections(): AppNavSection[] {
       ],
     },
     {
+      title: "Análisis",
+      items: [
+        {
+          id: "menu-engineering",
+          label: "Ingeniería de menú",
+          icon: "i-lucide-grid-2x2",
+          to: "/app/reportes/menu-engineering",
+          manageOnly: true,
+        },
+        {
+          id: "prime-cost",
+          label: "Prime cost",
+          icon: "i-lucide-gauge",
+          to: "/app/reportes/prime-cost",
+          manageOnly: true,
+        },
+      ],
+    },
+    {
       title: "Datos",
       items: [
         {
