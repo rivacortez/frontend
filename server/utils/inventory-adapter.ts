@@ -1,5 +1,6 @@
 import type { H3Event } from "h3";
 import type {
+  FreshnessStatus,
   IngredientCoverageView,
   InventoryMovement,
   MovementType,
@@ -201,22 +202,36 @@ export async function listWaste(event: H3Event): Promise<WasteHistory> {
   };
 }
 
-// ---- Cobertura de stock por insumo (Widget B) ----
+// ---- Cobertura de stock por insumo (Widget B + F3 vida útil) ----
 
-/** Backend shape for GET /api/inventory/ingredients/:id/coverage (decimal strings). */
+/**
+ * Backend shape for `GET /api/inventory/ingredients/:id/coverage` (decimal
+ * strings). Extended by B4 with shelf-life/freshness fields — all nullable
+ * together when the ingredient has no purchase to anchor an estimate on.
+ */
 interface BeIngredientCoverage {
   ingredientId: string;
   currentStock: string;
   avgDailyConsumption: string;
   basedOnDays: number;
   daysLeft: string | null;
+  shelfLifeDays: number;
+  lastPurchaseAt: string | null;
+  estimatedExpiryAt: string | null;
+  freshnessStatus: FreshnessStatus | null;
+  effectiveCoverageDays: string | null;
+  atRiskQty: string | null;
+  atRiskCost: string | null;
 }
 
 /**
  * Returns real stock coverage for a specific ingredient from
- * `GET /api/inventory/ingredients/:id/coverage`.
- * `daysLeft` is null when `avgDailyConsumption === 0` (no recent movements);
- * callers must surface this explicitly rather than defaulting to a hardcoded value.
+ * `GET /api/inventory/ingredients/:id/coverage`, including the B4 shelf-life
+ * fields (F3 "Vida útil" widget). `daysLeft` is null when
+ * `avgDailyConsumption === 0` (no recent movements); the freshness fields are
+ * null together when there is no purchase to anchor an expiry estimate on.
+ * Callers must surface both cases explicitly rather than defaulting to a
+ * hardcoded value.
  */
 export async function ingredientCoverage(
   event: H3Event,
@@ -233,6 +248,14 @@ export async function ingredientCoverage(
     avgDailyConsumption: num(d.avgDailyConsumption),
     basedOnDays: d.basedOnDays,
     daysLeft: d.daysLeft != null ? num(d.daysLeft) : null,
+    shelfLifeDays: d.shelfLifeDays,
+    lastPurchaseAt: d.lastPurchaseAt,
+    estimatedExpiryAt: d.estimatedExpiryAt,
+    freshnessStatus: d.freshnessStatus,
+    effectiveCoverageDays:
+      d.effectiveCoverageDays != null ? num(d.effectiveCoverageDays) : null,
+    atRiskQty: d.atRiskQty != null ? num(d.atRiskQty) : null,
+    atRiskCost: d.atRiskCost != null ? num(d.atRiskCost) : null,
   };
 }
 

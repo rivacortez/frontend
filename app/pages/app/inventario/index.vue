@@ -6,7 +6,7 @@ useSeoMeta({ title: 'Inventario — GastronomIA' })
 
 definePageHeader(() => ({
   title: 'Inventario',
-  subtitle: 'Controlá qué tenés, registrá movimientos y reponé lo que falta',
+  subtitle: 'Controla qué tienes, registra movimientos y repón lo que falta',
 }))
 
 const { user } = useUserSession()
@@ -299,7 +299,7 @@ async function onImportFile(e: Event): Promise<void> {
               v-if="filtered.length === 0"
               icon="i-lucide-package-search"
               title="No hay insumos en esta categoría"
-              subtitle="Probá con otro filtro o búsqueda."
+              subtitle="Prueba con otro filtro o búsqueda."
             />
           </div>
         </section>
@@ -312,7 +312,7 @@ async function onImportFile(e: Event): Promise<void> {
             <span class="stk-primary-ico" aria-hidden="true"><UIcon name="i-lucide-scan-line" /></span>
             <span class="stk-primary-body">
               <span class="stk-primary-title">Escanear factura</span>
-              <span class="stk-primary-sub">Cargá entradas desde una foto, sin tipear</span>
+              <span class="stk-primary-sub">Carga entradas desde una foto, sin tipear</span>
             </span>
             <span class="stk-primary-badge">Lo más rápido</span>
           </NuxtLink>
@@ -321,7 +321,7 @@ async function onImportFile(e: Event): Promise<void> {
             <NuxtLink to="/app/inventario/movimiento" class="stk-act">
               <UIcon name="i-lucide-plus-circle" class="stk-act-ico" aria-hidden="true" />
               <span class="stk-act-label">Ingreso manual</span>
-              <span class="stk-act-sub">Sumá o descontá a mano</span>
+              <span class="stk-act-sub">Suma o descuenta a mano</span>
             </NuxtLink>
             <NuxtLink v-if="canManage" to="/app/inventario/lista-compras" class="stk-act">
               <UIcon name="i-lucide-shopping-cart" class="stk-act-ico" aria-hidden="true" />
@@ -360,7 +360,7 @@ async function onImportFile(e: Event): Promise<void> {
           </dl>
           <p v-if="noCostCount" class="stk-aside-note">
             <button type="button" @click="cat = 'sin-costo'">
-              Completá el costo de {{ noCostCount }} insumo{{ noCostCount === 1 ? '' : 's' }}
+              Completa el costo de {{ noCostCount }} insumo{{ noCostCount === 1 ? '' : 's' }}
             </button>
             para afinar el valor estimado.
           </p>
@@ -372,8 +372,8 @@ async function onImportFile(e: Event): Promise<void> {
     <UiBottomSheet v-model="showImport" title="Importar insumos (CSV)">
       <div class="stk-import">
         <p class="stk-import-hint">
-          Subí un archivo <b>CSV</b> con tus insumos (nombre, categoría, unidad y costo).
-          Si volvés a subirlo, actualizamos los que ya existen — no se duplican.
+          Sube un archivo <b>CSV</b> con tus insumos (nombre, categoría, unidad y costo).
+          Si vuelves a subirlo, actualizamos los que ya existen — no se duplican.
         </p>
         <label class="stk-import-drop" :class="{ busy: importing }">
           <UIcon :name="importing ? 'i-lucide-loader-circle' : 'i-lucide-upload'" :class="{ spin: importing }" />

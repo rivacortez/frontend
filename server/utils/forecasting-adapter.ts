@@ -1,5 +1,6 @@
 import type { H3Event } from "h3";
 import type {
+  ForecastAccuracyView,
   ForecastContextStatus,
   ForecastDriver,
   ForecastInsightsView,
@@ -30,6 +31,10 @@ interface BeForecastSuggestion {
   forecastConsumption: string;
   shortfall: string;
   suggestedQty: string;
+  /** True when `suggestedQty` was reduced below the demand gap to avoid spoilage (B4). */
+  cappedByShelfLife: boolean;
+  /** Pre-cap `suggestedQty` (shortfall-based); null when not capped. */
+  uncappedSuggestedQty: string | null;
 }
 
 /**
@@ -38,7 +43,7 @@ interface BeForecastSuggestion {
  * strict enum) because a still-unknown kind must survive the round trip and
  * degrade to a generic badge client-side, never throw during JSON parsing.
  */
-interface BeForecastDriver {
+export interface BeForecastDriver {
   date: string;
   kind: string;
   label: string;
@@ -74,11 +79,44 @@ interface BeForecastInsightsData {
   needsForecast: boolean;
 }
 
+/**
+ * Accuracy point/metrics as emitted by `GET /forecasting/accuracy`
+ * (`forecast-accuracy.ts` on team-backend) — already plain numbers, not
+ * Decimal strings, since these are computed metrics rather than DB money.
+ */
+interface BeForecastAccuracyPoint {
+  date: string;
+  predicted: number;
+  actual: number;
+  yhatLo: number;
+  yhatHi: number;
+}
+
+interface BeForecastAccuracyMetrics {
+  smapeRealized: number | null;
+  mapeRealized: number | null;
+  coveragePct: number | null;
+  points: number;
+}
+
+interface BeForecastAccuracyData {
+  series: BeForecastAccuracyPoint[];
+  metrics: BeForecastAccuracyMetrics;
+  runsEvaluated: number;
+  needsMoreData: boolean;
+  message?: string;
+}
+
 const num = (s: string | null | undefined): number =>
   s == null ? 0 : Number(s);
 
-/** Maps the backend's snake_case driver shape to the frontend's camelCase view. */
-function toDriver(d: BeForecastDriver): ForecastDriver {
+/**
+ * Maps the backend's snake_case driver shape to the frontend's camelCase view.
+ * Exported for reuse by other BFF routes that embed drivers in their payload
+ * (e.g. `server/api/chat/query.post.ts`'s `forecast.drivers`, F2b) — same
+ * backend contract (`forecastDriverSchema`), no reason to duplicate the mapping.
+ */
+export function toDriver(d: BeForecastDriver): ForecastDriver {
   return {
     date: d.date,
     kind: d.kind,
@@ -141,9 +179,18 @@ export async function forecastShoppingSuggestions(
       shortfall,
       suggestedQty,
       estimatedCost: +(suggestedQty * unitCost).toFixed(2),
+      // Cost to cover the gap itself (F2a "S/ en riesgo") — see the TSDoc on
+      // `ForecastShoppingItem.shortfallCost` for why this stays separate
+      // from `estimatedCost` even though both use `unitCost` today.
+      shortfallCost: +(shortfall * unitCost).toFixed(2),
       reason: `Déficit de forecast: ${shortfall} ${s.unit}`,
       urgent: shortfall > 0,
       checked: false,
+      cappedByShelfLife: s.cappedByShelfLife,
+      uncappedSuggestedQty:
+        s.uncappedSuggestedQty != null
+          ? +num(s.uncappedSuggestedQty).toFixed(2)
+          : null,
     };
   });
 
@@ -193,4 +240,32 @@ export async function forecastInsights(
     upcomingDrivers: res.data.upcomingDrivers.map(toDriver),
     improvementPct: backtest?.improvementPct ?? null,
   };
+}
+
+/**
+ * Fetches the forecast self-evaluation from `GET /api/forecasting/accuracy`
+ * (HU-08-08, "el sistema se autoevalúa" — F2a) and maps it 1:1 to the
+ * frontend `ForecastAccuracyView`. Unlike the shopping/insights adapters,
+ * every numeric field here is already a plain number on the backend
+ * (computed metrics, not Prisma `Decimal` money) — no string coercion needed.
+ *
+ * `needsMoreData: true` means too few elapsed forecast days exist for the
+ * metrics to be representative (includes the 0-runs case). Callers MUST
+ * render an explicit explanatory state, never a chart with near-empty data.
+ *
+ * @param event Nitro H3 event (session token extracted server-side).
+ * @param scope 'total' (default) or 'menuItem' — same ambit as `/predictions`.
+ * @param menuItemId Required by the backend when `scope === 'menuItem'`.
+ */
+export async function forecastAccuracy(
+  event: H3Event,
+  scope?: string,
+  menuItemId?: string,
+): Promise<ForecastAccuracyView> {
+  const res = await backendFetch<Envelope<BeForecastAccuracyData>>(
+    event,
+    "/api/forecasting/accuracy",
+    { query: { scope, menuItemId } },
+  );
+  return res.data;
 }

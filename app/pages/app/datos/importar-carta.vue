@@ -105,6 +105,18 @@ interface EditableIngredient extends PreviewIngredient {
 let _keySeq = 0
 const reviewMenuItems = ref<EditableMenuItem[]>([])
 const reviewIngredients = ref<EditableIngredient[]>([])
+
+/**
+ * QA-11: `isEmpty` (abajo) solo mira el conteo ACTUAL de filas, así que no
+ * puede distinguir "la IA no encontró nada en el archivo" de "el usuario
+ * borró todas las filas durante la revisión" — ambos casos terminan con 0
+ * platos y 0 insumos, pero requieren mensajes distintos. Este flag captura
+ * el resultado ORIGINAL de la extracción (se fija una sola vez, al terminar
+ * `handleFile`) para que el banner de "nada para importar" pueda mostrar el
+ * mensaje correcto en cada caso.
+ */
+const extractionFoundNothing = ref(false)
+
 const commitResult = ref<{
   created: { menuItems: number; ingredients: number; categories: number }
   skipped: string[]
@@ -170,7 +182,7 @@ async function handleFile(file: File): Promise<void> {
   if (!ACCEPTED_MIME.has(file.type) && !ACCEPTED_EXT.test(file.name)) {
     toast.add({
       title: 'Formato no compatible',
-      description: 'Usá un archivo PDF, Excel (.xlsx) o CSV.',
+      description: 'Usa un archivo PDF, Excel (.xlsx) o CSV.',
       icon: 'i-lucide-alert-circle',
       color: 'error',
     })
@@ -201,7 +213,7 @@ async function handleFile(file: File): Promise<void> {
       description:
         e?.data?.message
         ?? e?.statusMessage
-        ?? 'Verificá que el archivo tenga el formato correcto y no esté vacío.',
+        ?? 'Verifica que el archivo tenga el formato correcto y no esté vacío.',
       icon: 'i-lucide-alert-circle',
       color: 'error',
     })
@@ -228,6 +240,9 @@ async function handleFile(file: File): Promise<void> {
     unit: item.unit ?? '',
     estimatedCost: item.estimatedCost ?? null,
   }))
+
+  // Snapshot del resultado crudo de la IA, antes de que el usuario pueda editar/borrar filas.
+  extractionFoundNothing.value = reviewMenuItems.value.length === 0 && reviewIngredients.value.length === 0
 
   phase.value = 'review'
 }
@@ -264,6 +279,7 @@ function cancelReview(): void {
   reviewIngredients.value = []
   previewProvider.value = ''
   pickedFileName.value = ''
+  extractionFoundNothing.value = false
 }
 
 /**
@@ -301,7 +317,7 @@ async function confirmImport(): Promise<void> {
     const e = err as { statusMessage?: string; data?: { message?: string } }
     toast.add({
       title: 'Error al guardar los datos',
-      description: e?.data?.message ?? e?.statusMessage ?? 'Intentá de nuevo.',
+      description: e?.data?.message ?? e?.statusMessage ?? 'Intenta de nuevo.',
       icon: 'i-lucide-alert-circle',
       color: 'error',
     })
@@ -329,6 +345,7 @@ function startOver(): void {
   commitResult.value = null
   previewProvider.value = ''
   pickedFileName.value = ''
+  extractionFoundNothing.value = false
 }
 </script>
 
@@ -340,7 +357,7 @@ function startOver(): void {
         phase === 'extracting' ? 'Procesando con IA...'
         : phase === 'review' ? `${reviewMenuItems.length} platos · ${reviewIngredients.length} insumos`
         : phase === 'done' ? 'Importación completa'
-        : 'Subí tu menú o lista de insumos'
+        : 'Sube tu menú o lista de insumos'
       "
       back="/app/datos/importar"
     />
@@ -419,10 +436,10 @@ function startOver(): void {
             <UIcon name="i-lucide-upload-cloud" />
           </span>
           <p class="ic-drop-title">
-            {{ isDragging ? 'Soltá el archivo aquí' : 'Arrastrá tu archivo aquí' }}
+            {{ isDragging ? 'Suelta el archivo aquí' : 'Arrastra tu archivo aquí' }}
           </p>
           <p class="ic-drop-sub">
-            o hacé clic para seleccionarlo
+            o haz clic para seleccionarlo
           </p>
           <div class="ic-drop-formats" aria-label="Formatos aceptados">
             <span class="ic-fmt-pill">PDF</span>
@@ -446,9 +463,9 @@ function startOver(): void {
         <div class="ic-explainer">
           <UIcon name="i-lucide-info" aria-hidden="true" />
           <p>
-            Subí tu carta en PDF o Excel, o una lista de insumos en CSV.
+            Sube tu carta en PDF o Excel, o una lista de insumos en CSV.
             La IA extrae los platos, precios e insumos para que no cargues todo a mano.
-            Revisás antes de confirmar — nada se guarda hasta que aceptés.
+            Revisas antes de confirmar — nada se guarda hasta que aceptes.
           </p>
         </div>
       </section>
@@ -493,14 +510,14 @@ function startOver(): void {
         </div>
 
         <p class="ic-review-notice" role="status">
-          Revisá los datos antes de confirmar.
-          Podés editar o eliminar filas. <strong>Nada se guarda hasta que confirmes.</strong>
+          Revisa los datos antes de confirmar.
+          Puedes editar o eliminar filas. <strong>Nada se guarda hasta que confirmes.</strong>
         </p>
 
         <!-- Validation error summary -->
         <div v-if="hasValidationErrors" class="ic-error-banner" role="alert">
           <UIcon name="i-lucide-alert-triangle" aria-hidden="true" />
-          <span>Corregí los campos marcados en rojo antes de confirmar.</span>
+          <span>Corrige los campos marcados en rojo antes de confirmar.</span>
         </div>
 
         <!-- ---- Menu items table ---- -->
@@ -710,10 +727,22 @@ function startOver(): void {
           </div>
         </div>
 
-        <!-- Empty state when user removed everything -->
+        <!-- Empty state: distingue "la IA no encontró nada en el archivo" (QA-11) de
+             "el usuario eliminó todas las filas durante la revisión". -->
         <div v-if="isEmpty" class="ic-empty-warning" role="alert">
-          <UIcon name="i-lucide-alert-circle" aria-hidden="true" />
-          <span>Eliminaste todos los elementos. No hay nada para importar.</span>
+          <template v-if="extractionFoundNothing">
+            <UIcon name="i-lucide-file-search" aria-hidden="true" />
+            <span>
+              La IA no encontró platos ni insumos en este archivo. Verifica que tenga una
+              tabla o lista reconocible (nombre + precio para platos, nombre + unidad para
+              insumos) — funciona mejor con un PDF o Excel exportado directo de tu carta,
+              o un CSV con columnas claras.
+            </span>
+          </template>
+          <template v-else>
+            <UIcon name="i-lucide-alert-circle" aria-hidden="true" />
+            <span>Eliminaste todos los elementos. No hay nada para importar.</span>
+          </template>
         </div>
 
         <!-- Actions -->

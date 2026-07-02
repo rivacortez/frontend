@@ -1,10 +1,71 @@
 import { z } from "zod";
+import type {
+  ChatForecastEstimatedRevenue,
+  ChatForecastMeta,
+  ChatForecastPoint,
+  ChatQueryKind,
+} from "#shared/types/domain";
 import { backendFetch } from "../../utils/backend";
+import {
+  toDriver,
+  type BeForecastDriver,
+} from "../../utils/forecasting-adapter";
 
 /**
- * Shape of the data object returned by POST /api/chat/query on the NestJS backend.
- * Exported so the client composable can import it for static typing without duplicating
- * the contract. `rows` uses the widest safe SQL cell type; SQL NULLs arrive as null.
+ * Raw `forecast.points[]` entry as emitted by the backend (core-ai contract,
+ * snake_case — see `forecastPointSchema` in `src/shared/forecasting/forecast.ts`
+ * on team-backend).
+ */
+interface BeChatForecastPoint {
+  target_date: string;
+  yhat: number;
+  yhat_lo: number;
+  yhat_hi: number;
+}
+
+/**
+ * Raw `forecast` block as emitted by the backend (F2b / LOTE B3 — see
+ * `chatForecastMetaSchema` in `src/shared/chat/chat.ts` on team-backend).
+ * Top-level keys are already camelCase; only the nested `points`/`drivers`
+ * inherit core-ai's snake_case field names, so those need mapping.
+ *
+ * `unitLabel`/`estimatedRevenue` were added ADDITIVELY by the backend fix for
+ * QA-23 (the series was in units all along; the fix just declares the unit
+ * and, separately, a derived money estimate) — both are optional here so a
+ * backend that hasn't shipped the fix yet still round-trips without error.
+ */
+interface BeChatForecastMeta {
+  runId: string;
+  range: { from: string; to: string; label: string };
+  totalYhat: number;
+  totalLo: number;
+  totalHi: number;
+  points: BeChatForecastPoint[];
+  drivers: BeForecastDriver[];
+  unitLabel?: string;
+  estimatedRevenue?: ChatForecastEstimatedRevenue | null;
+}
+
+/** Raw shape of the data object returned by POST /api/chat/query on the NestJS backend. */
+interface BeChatQueryResult {
+  answer: string;
+  sql: string;
+  columns: string[];
+  rows: (string | number | null)[][];
+  provider: string;
+  model: string;
+  /** ADDITIVE (F2b) — absent on responses from before this batch shipped. */
+  kind?: ChatQueryKind;
+  /** ADDITIVE (F2b) — present only when `kind === 'future'` and data was available. */
+  forecast?: BeChatForecastMeta;
+}
+
+/**
+ * Shape of the data object this BFF route returns to the client (post-mapping).
+ * Exported so the client composable can import it for static typing without
+ * duplicating the contract. `rows` uses the widest safe SQL cell type; SQL
+ * NULLs arrive as null. `kind`/`forecast` are ADDITIVE (F2b) — a client that
+ * still only reads `answer/sql/columns/rows/provider/model` keeps working.
  */
 export interface ChatQueryResult {
   /** Natural-language answer synthesised from the query results. */
@@ -15,15 +76,58 @@ export interface ChatQueryResult {
   columns: string[];
   /** Result rows. Each cell is a string, number, or null (SQL NULL). */
   rows: (string | number | null)[][];
-  /** AI provider identifier (e.g. "mock", "openai"). */
+  /** AI provider identifier (e.g. "mock", "openai"), or "system" for non-LLM responses. */
   provider: string;
-  /** Model identifier within the provider (e.g. "gpt-4o-mini"). */
+  /** Model identifier within the provider (e.g. "gpt-4o-mini", or "forecast-run"/"intent-classifier"). */
   model: string;
+  /** Question classification (F2b). Absent on legacy responses — treat as `historical`. */
+  kind?: ChatQueryKind;
+  /** Structured forecast data (F2b), mapped to camelCase; present only for `kind: 'future'` with data. */
+  forecast?: ChatForecastMeta;
 }
 
 interface Envelope<T> {
   success: boolean;
   data: T;
+}
+
+/** Maps a raw backend forecast point (snake_case) to the frontend's camelCase view. */
+function toForecastPoint(p: BeChatForecastPoint): ChatForecastPoint {
+  return {
+    targetDate: p.target_date,
+    yhat: p.yhat,
+    yhatLo: p.yhat_lo,
+    yhatHi: p.yhat_hi,
+  };
+}
+
+/** Maps the raw backend `forecast` block to the frontend's camelCase view. */
+function toForecastMeta(f: BeChatForecastMeta): ChatForecastMeta {
+  return {
+    runId: f.runId,
+    range: f.range,
+    totalYhat: f.totalYhat,
+    totalLo: f.totalLo,
+    totalHi: f.totalHi,
+    points: f.points.map(toForecastPoint),
+    drivers: f.drivers.map(toDriver),
+    unitLabel: f.unitLabel,
+    estimatedRevenue: f.estimatedRevenue,
+  };
+}
+
+/** Maps the raw backend chat response to the shape this BFF route returns. */
+function toChatQueryResult(be: BeChatQueryResult): ChatQueryResult {
+  return {
+    answer: be.answer,
+    sql: be.sql,
+    columns: be.columns,
+    rows: be.rows,
+    provider: be.provider,
+    model: be.model,
+    kind: be.kind,
+    forecast: be.forecast ? toForecastMeta(be.forecast) : undefined,
+  };
 }
 
 // Validates the request body: question must be a non-empty string up to 2 000 chars.
@@ -47,7 +151,7 @@ const queryBodySchema = z.object({
  */
 export default defineEventHandler(async (event) => {
   const body = await readValidatedBody(event, queryBodySchema.parse);
-  const res = await backendFetch<Envelope<ChatQueryResult>>(
+  const res = await backendFetch<Envelope<BeChatQueryResult>>(
     event,
     "/api/chat/query",
     {
@@ -55,5 +159,5 @@ export default defineEventHandler(async (event) => {
       body,
     },
   );
-  return ok(res.data);
+  return ok(toChatQueryResult(res.data));
 });

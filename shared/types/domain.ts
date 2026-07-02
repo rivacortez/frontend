@@ -251,6 +251,31 @@ export interface ForecastShoppingItem extends ShoppingItem {
   currentStock: number;
   forecastConsumption: number;
   shortfall: number;
+  /**
+   * `shortfall × unitCost` — the cost of covering the projected demand gap
+   * (F2a "S/ en riesgo"). Deliberately DISTINCT from `estimatedCost`
+   * (`suggestedQty × unitCost`, the recommended purchase): the backend
+   * currently sets `suggestedQty = shortfall` (see
+   * `shopping-suggestions.ts` on team-backend) so they read the same today,
+   * but `suggestedQty` is documented to diverge once purchase-lot rounding
+   * ships — `shortfallCost` must keep meaning "cost to cover the gap", not
+   * "cost of the recommended purchase", regardless of future lot sizing.
+   */
+  shortfallCost: number;
+  /**
+   * True when the backend reduced `suggestedQty` below what the demand gap
+   * (`shortfall`) alone would call for, because buying more would spoil before
+   * it can be consumed (shelf-life-aware purchasing, B4). When true, prefer
+   * showing `uncappedSuggestedQty` alongside `suggestedQty` so the reduction
+   * is legible rather than looking like a rounding artifact.
+   */
+  cappedByShelfLife: boolean;
+  /**
+   * The quantity that would have been suggested WITHOUT the shelf-life cap
+   * (i.e. `shortfall`-based, pre-adjustment). Null when `cappedByShelfLife` is
+   * false — there is nothing to contrast `suggestedQty` against.
+   */
+  uncappedSuggestedQty: number | null;
 }
 
 /**
@@ -325,8 +350,68 @@ export interface ForecastInsightsView {
 }
 
 /**
- * Real stock coverage in days, computed by the backend from 30-day avg consumption.
- * `daysLeft: null` when `avgDailyConsumption === 0` (no recent movements).
+ * A single already-elapsed day: what the forecast predicted (with its
+ * [yhatLo, yhatHi] band) vs. what actually sold, per
+ * `GET /forecasting/accuracy` (HU-08-08, "el sistema se autoevalúa").
+ */
+export interface ForecastAccuracyPoint {
+  date: string;
+  predicted: number;
+  actual: number;
+  yhatLo: number;
+  yhatHi: number;
+}
+
+/**
+ * Aggregate accuracy metrics over `series`. `smapeRealized`/`mapeRealized`
+ * are REALIZED error (predicted vs. real sales), not the model's internal
+ * backtest — see `ForecastInsightsView.improvementPct` for that. `null`
+ * when there are 0 comparable points. `coveragePct` = % of days whose real
+ * value fell inside [yhatLo, yhatHi] (interval calibration).
+ */
+export interface ForecastAccuracyMetrics {
+  smapeRealized: number | null;
+  mapeRealized: number | null;
+  coveragePct: number | null;
+  points: number;
+}
+
+/**
+ * View for the "Precisión del pronóstico" screen (F2a) — the thesis's
+ * self-evaluation evidence. `needsMoreData: true` means too few elapsed
+ * forecast days exist yet for the metrics to be meaningful (includes the
+ * zero-runs case); the UI MUST show an explanatory state, never a chart
+ * with near-empty data. `message` carries the backend's explanation in that
+ * case.
+ */
+export interface ForecastAccuracyView {
+  series: ForecastAccuracyPoint[];
+  metrics: ForecastAccuracyMetrics;
+  /** Number of completed forecast runs that contributed at least one elapsed day. */
+  runsEvaluated: number;
+  needsMoreData: boolean;
+  message?: string;
+}
+
+/**
+ * Freshness state of an ingredient, computed server-side from its shelf life
+ * and last purchase date. `null` (on {@link IngredientCoverageView}) means the
+ * backend has nothing to base a freshness estimate on — either the ingredient
+ * has no purchase history yet, or it isn't tracked for perishability.
+ */
+export type FreshnessStatus = "fresh" | "expiring_soon" | "expired";
+
+/**
+ * Real stock coverage in days, computed by the backend from 30-day avg
+ * consumption, extended with shelf-life/freshness data (B4). `daysLeft: null`
+ * when `avgDailyConsumption === 0` (no recent movements).
+ *
+ * The freshness fields (`shelfLifeDays` through `atRiskCost`) are ALL derived
+ * server-side from the ingredient's last purchase — the frontend never
+ * recomputes expiry math (no FEFO, no lot tracking) here, it only presents
+ * these values. `lastPurchaseAt`/`estimatedExpiryAt`/`freshnessStatus`/
+ * `atRiskQty`/`atRiskCost` are `null` together when there is no purchase to
+ * anchor a freshness estimate on.
  */
 export interface IngredientCoverageView {
   ingredientId: string;
@@ -336,6 +421,29 @@ export interface IngredientCoverageView {
   basedOnDays: number;
   /** null → no recent consumption; estimate is not possible. */
   daysLeft: number | null;
+  /** Shelf life configured for this ingredient, in days. */
+  shelfLifeDays: number;
+  /** ISO date of the last registered purchase, or null if none exists. */
+  lastPurchaseAt: string | null;
+  /** `lastPurchaseAt + shelfLifeDays`, or null when `lastPurchaseAt` is null. */
+  estimatedExpiryAt: string | null;
+  /** Server-computed freshness state; null when no purchase anchors the estimate. */
+  freshnessStatus: FreshnessStatus | null;
+  /**
+   * The real stock coverage in days: `min(daysLeft, daysUntilExpiry)`. This is
+   * the figure the UI should present as the headline number — whichever
+   * constraint (running out vs. spoiling) is tighter is what actually limits
+   * usable stock. Null only when both `daysLeft` and the expiry estimate are
+   * unknown.
+   */
+  effectiveCoverageDays: number | null;
+  /**
+   * Quantity projected to spoil before it can be consumed, given the demand
+   * pace — null when there is no freshness tracking for this ingredient.
+   */
+  atRiskQty: number | null;
+  /** PEN value of `atRiskQty`; null under the same conditions. */
+  atRiskCost: number | null;
 }
 
 /** Single price-history data point from a purchase order or manual adjustment. */
@@ -481,6 +589,92 @@ export interface ChatTableData {
   rows: (string | number | null)[][];
 }
 
+/**
+ * Classification of a chat question, computed server-side BEFORE deciding
+ * whether to call the NL2SQL pipeline (F2b / LOTE B3, backend
+ * `intent-classifier.util.ts`). `historical` is the original R1-R10 flow
+ * (unchanged). Optional/absent on legacy responses that predate this field —
+ * callers must treat a missing `kind` as `historical`.
+ */
+export type ChatQueryKind =
+  "historical" | "future" | "out_of_domain" | "ambiguous";
+
+/**
+ * Single day within a `ChatForecastMeta.points` array. Mirrors the backend's
+ * `forecastPointSchema` (core-ai contract), mapped from snake_case at the BFF.
+ */
+export interface ChatForecastPoint {
+  targetDate: string;
+  yhat: number;
+  yhatLo: number;
+  yhatHi: number;
+}
+
+/** Resolved date range the user asked about (e.g. "este fin de semana"). */
+export interface ChatForecastRange {
+  from: string;
+  to: string;
+  label: string;
+}
+
+/**
+ * Backend-declared derivation of the unit forecast into an estimated money
+ * amount (QA-23), using the tenant's average ticket price over a recent
+ * window. `null` when there is not enough recent sales history to derive a
+ * price — the UI must then show units only, never a fabricated currency
+ * figure.
+ */
+export interface ChatForecastEstimatedRevenue {
+  total: number;
+  lo: number;
+  hi: number;
+  /** Average unit price (PEN) used for the derivation. */
+  avgUnitPrice: number;
+  /** Size (in days) of the recent-sales window the average price was computed over. */
+  basisDays: number;
+}
+
+/**
+ * Structured forecast payload attached to a `kind: 'future'` chat response
+ * when the backend had a completed run covering the requested range (F2b /
+ * LOTE B3). Carries the SAME numbers already narrated in `ChatMessage.content`
+ * as plain text, but in a shape the UI can render as a compact visual block
+ * (total + band, day-by-day breakdown, drivers) instead of parsing the
+ * answer string. Absent when `kind === 'future'` but the backend had no data
+ * for the range (e.g. `needsForecast`/out-of-horizon) — in that case only
+ * `content` carries the explanation.
+ *
+ * IMPORTANT (QA-23): `totalYhat`/`totalLo`/`totalHi` and every `points[]`
+ * entry are expressed in UNITS (see `unitLabel`, e.g. "platos"), never in
+ * currency. `estimatedRevenue` is a separate, explicitly-derived money figure
+ * — render it as a secondary line, not as the headline number.
+ */
+export interface ChatForecastMeta {
+  /** `ForecastRun` id backing these numbers — for traceability/audit. */
+  runId: string;
+  range: ChatForecastRange;
+  totalYhat: number;
+  totalLo: number;
+  totalHi: number;
+  /** Day-level breakdown within `range`. */
+  points: ChatForecastPoint[];
+  /** Exogenous drivers (holidays, payday, weather...) within the same range. */
+  drivers: ForecastDriver[];
+  /**
+   * Unit of `totalYhat`/`totalLo`/`totalHi`/`points[].yhat*` (e.g. "platos").
+   * Optional — absent on legacy responses fetched before this field shipped
+   * (an already-rendered message in an open chat thread); treat a missing
+   * value as unitless rather than defaulting to currency.
+   */
+  unitLabel?: string;
+  /**
+   * Money estimate derived from the unit forecast, or `null` when the
+   * backend had no recent sales to derive a price from. Absent (not just
+   * `null`) on legacy responses — see `unitLabel`.
+   */
+  estimatedRevenue?: ChatForecastEstimatedRevenue | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -494,6 +688,10 @@ export interface ChatMessage {
   provider?: string;
   /** Model identifier from the provider (e.g. "gpt-4o"). */
   model?: string;
+  /** ADDITIVE (F2b) — question classification; absent on legacy responses. */
+  kind?: ChatQueryKind;
+  /** ADDITIVE (F2b) — present only when `kind === 'future'` and data was available. */
+  forecast?: ChatForecastMeta;
   createdAt: string;
 }
 

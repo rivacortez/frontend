@@ -508,7 +508,7 @@ function downloadTemplate(): void {
         <p class="di-modal-text">
           Hay <b>{{ dryRunReport?.errors.length }}</b>
           fila{{ (dryRunReport?.errors.length ?? 0) === 1 ? '' : 's' }} con error.
-          Las filas válidas se importarán de todas formas si confirmás.
+          Las filas válidas se importarán de todas formas si confirmas.
         </p>
 
         <div v-if="dryRunReport?.errors.length" class="di-err-list" aria-label="Errores detectados">

@@ -16,12 +16,12 @@ const pillars = [
   {
     icon: 'i-lucide-calculator',
     title: 'Costeo por plato',
-    desc: 'Recetas, mermas y márgenes recalculados con cada compra. Sabés cuánto deja cada plato.',
+    desc: 'Recetas, mermas y márgenes recalculados con cada compra. Sabes cuánto deja cada plato.',
   },
   {
     icon: 'i-lucide-message-square-text',
     title: 'Chat analítico',
-    desc: 'Preguntá en español —«¿qué plato dejó más margen?»— y obtené la respuesta al instante.',
+    desc: 'Pregunta en español —«¿qué plato dejó más margen?»— y obtén la respuesta al instante.',
   },
 ]
 </script>
@@ -44,7 +44,7 @@ const pillars = [
       <p class="eyebrow">Rentabilidad con IA · Restaurantes PyME</p>
       <h1 class="display hero-title">Tu restaurante, rentable.</h1>
       <p class="hero-sub">
-        Pronosticá la demanda, costeá cada plato al céntimo y preguntale a tus
+        Pronostica la demanda, costea cada plato al céntimo y pregúntale a tus
         ventas en español.
       </p>
       <div class="hero-cta">

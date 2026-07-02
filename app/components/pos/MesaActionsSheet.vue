@@ -17,6 +17,15 @@ const toast = useToast()
 const patchTable = usePatchTable()
 const patchOrder = usePatchOrder()
 
+// RBAC: staff podía VER acciones owner/manager-only (descuento, transferir,
+// cerrar sin cobrar) y solo se enteraba de que no tenía permiso al chocar con
+// el 403 del backend. Ocultamos esas filas del todo para staff — mismo
+// criterio que ya usa el resto del shell (p. ej. `menu.vue`) para gatear por rol.
+const { user } = useUserSession()
+const canManageTable = computed(
+  () => user.value?.role === 'owner' || user.value?.role === 'manager',
+)
+
 const tableLabel = computed(() => String(props.table.number).padStart(2, '0'))
 // `props.order` es la orden persistida en el backend — solo cuenta lo YA
 // enviado a cocina. Los ítems "por enviar" (carrito local de la pantalla de
@@ -35,7 +44,7 @@ interface MesaAction {
   separated?: boolean
 }
 
-const actions: MesaAction[] = [
+const ALL_ACTIONS: MesaAction[] = [
   { id: 'descuento', icon: 'i-lucide-badge-percent', label: 'Aplicar descuento', sub: 'Por porcentaje o monto fijo', ownerOnly: true },
   { id: 'pre-cuenta', icon: 'i-lucide-receipt-text', label: 'Pre-cuenta', sub: 'Genera ticket sin cobrar' },
   { id: 'transferir', icon: 'i-lucide-arrow-right-left', label: 'Transferir mesa', sub: 'Mover el pedido a otra mesa', ownerOnly: true },
@@ -43,6 +52,11 @@ const actions: MesaAction[] = [
   { id: 'notas', icon: 'i-lucide-sticky-note', label: 'Notas de la mesa', sub: 'Comentarios para cocina' },
   { id: 'cerrar-sin-cobrar', icon: 'i-lucide-circle-x', label: 'Cerrar sin cobrar', sub: 'Requiere motivo', danger: true, ownerOnly: true, separated: true },
 ]
+
+/** Acciones visibles para el rol actual: staff no ve las owner/manager-only. */
+const actions = computed<MesaAction[]>(() =>
+  ALL_ACTIONS.filter(a => !a.ownerOnly || canManageTable.value),
+)
 
 const CLOSE_REASONS = [
   { id: 'cortesia', label: 'Cortesía de la casa' },

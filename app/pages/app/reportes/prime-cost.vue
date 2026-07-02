@@ -40,6 +40,13 @@ const pc = usePrimeCost(period, () => canManage.value)
 const num = (s: string | number | undefined | null) => toNumber(s)
 const fmtPct = (n: string | number | undefined | null): string => formatPercent(n)
 
+// QA-09: un período sin ventas (revenue = 0) hace que foodCostPct/laborCostPct/
+// primeCostPct también sean 0, y el backend clasifica 0 % como status="good" —
+// una mentira estadística ("Bueno · estructura saludable" cuando en realidad no
+// hubo operación). Detectamos el período vacío por revenue = 0 y mostramos un
+// empty state en vez del gauge con veredicto.
+const hasData = computed(() => num(pc.data.value?.revenue) > 0)
+
 // ===== Prime cost gauge SVG =====
 // Display scale: 0–80 % (beyond 80 % is catastrophic; the indicator is clamped).
 // Benchmark bands:
@@ -168,7 +175,15 @@ watch(
         <RepError v-if="pc.error.value" @retry="pc.refresh()" />
         <RepLoading v-else-if="pc.isLoading.value && !pc.data.value" />
 
-        <template v-else-if="pc.data.value">
+        <!-- QA-09: período sin ventas — no hay base real para un veredicto de prime cost -->
+        <UiEmptyState
+          v-else-if="pc.data.value && !hasData"
+          icon="i-lucide-calendar-x"
+          title="Sin datos para este período"
+          subtitle="No se registraron ventas en este período, así que no hay una base para calcular el prime cost. Elige otro período o espera a que haya ventas registradas."
+        />
+
+        <template v-else-if="pc.data.value && hasData">
           <!-- ===== KPI stat grid ===== -->
           <div class="pc-stat-grid">
             <!-- Prime cost % — hero KPI -->
@@ -499,7 +514,7 @@ watch(
 
       <!-- ===== Aside: summary panel ===== -->
       <aside
-        v-if="pc.data.value && canManage"
+        v-if="pc.data.value && hasData && canManage"
         class="scr-aside"
       >
         <section class="scr-panel">

@@ -15,6 +15,7 @@ import {
   useInventoryReport,
   useFoodCostReport,
   useWasteReport,
+  useForecastAccuracy,
   useReportCsv,
   type SalesGroupBy,
   type DateWindow,
@@ -30,7 +31,7 @@ const toast = useToast()
 const canManage = computed(() => user.value?.role === 'owner' || user.value?.role === 'manager')
 
 /* ============ Tabs ============ */
-type TabId = 'dashboard' | 'ventas' | 'pareto' | 'inventario' | 'foodcost' | 'mermas'
+type TabId = 'dashboard' | 'ventas' | 'pareto' | 'inventario' | 'foodcost' | 'mermas' | 'precision'
 interface Tab { id: TabId, label: string, icon: string, manageOnly?: boolean }
 const ALL_TABS: Tab[] = [
   { id: 'dashboard', label: 'Dashboard', icon: 'i-lucide-layout-dashboard' },
@@ -39,6 +40,12 @@ const ALL_TABS: Tab[] = [
   { id: 'inventario', label: 'Inventario', icon: 'i-lucide-package', manageOnly: true },
   { id: 'foodcost', label: 'Food cost', icon: 'i-lucide-percent', manageOnly: true },
   { id: 'mermas', label: 'Mermas', icon: 'i-lucide-trash-2', manageOnly: true },
+  // F2a / HU-08-08 · "El sistema se autoevalúa": vive junto a los demás análisis
+  // de gestión (mismo tab bar, mismo shell .scr-*) en vez de una ruta propia —
+  // es otro análisis de reportes, no un flujo operativo distinto, y así
+  // hereda gating por rol, RepLoading/RepError y el resto del lenguaje visual
+  // sin duplicar chrome. Enlazada además desde "Lo que se viene" en el home.
+  { id: 'precision', label: 'Precisión', icon: 'i-lucide-crosshair', manageOnly: true },
 ]
 const tabs = computed(() => ALL_TABS.filter(t => !t.manageOnly || canManage.value))
 const tab = ref<TabId>('dashboard')
@@ -102,6 +109,11 @@ const period = ref(currentPeriod())
 const foodcost = useFoodCostReport(period, () => tab.value === 'foodcost' && canManage.value)
 
 const waste = useWasteReport(window, () => tab.value === 'mermas' && canManage.value)
+
+// F2a / HU-08-08 · Precisión: scope 'total' (agregado del negocio) — sin selector
+// de plato en esta primera versión; el contrato ya soporta scope=menuItem si
+// se necesita un drill-down por plato más adelante.
+const accuracy = useForecastAccuracy('total', undefined, () => tab.value === 'precision' && canManage.value)
 
 /* ============ Derived (charts) ============ */
 // Serie de ventas del admin: 7 días (barras CSS).
@@ -173,7 +185,27 @@ const wasteTopReason = computed(() => {
   return rows.reduce((top, r) => (num(r.cost) > num(top.cost) ? r : top))
 })
 
-/* ============ CSV export (HU-07-10) ============ */
+// F2a / HU-08-08 · Precisión: métricas realizadas en lenguaje humano. El sMAPE
+// crudo es jerga académica — se muestra como término secundario entre
+// paréntesis (rigor de tesis) pero el titular siempre es la frase narrada.
+const accSeries = computed(() => accuracy.data.value?.series ?? [])
+const accMetrics = computed(() => accuracy.data.value?.metrics ?? null)
+const accSmapeLabel = computed(() => {
+  const v = accMetrics.value?.smapeRealized
+  return v == null ? '—' : `${v.toFixed(1)}%`
+})
+const accMapeLabel = computed(() => {
+  const v = accMetrics.value?.mapeRealized
+  return v == null ? '—' : `${v.toFixed(1)}%`
+})
+// "N de M días reales cayeron dentro del rango proyectado" — coveragePct ya
+// viene calculado por el backend; points = M (nº de días comparados).
+const accCoverageDays = computed(() => {
+  const pct = accMetrics.value?.coveragePct
+  const points = accMetrics.value?.points ?? 0
+  if (pct == null || points === 0) return null
+  return { inRange: Math.round((pct / 100) * points), total: points, pct }
+})
 const downloadCsv = useReportCsv()
 const exporting = ref(false)
 async function exportCsv(report: 'sales' | 'inventory' | 'food-cost' | 'waste'): Promise<void> {
@@ -564,7 +596,7 @@ function periodLabel(p: string): string {
                 <div class="scr-stat"><dt><span class="rep-seg-dot s-b" />Soporte (B)</dt><dd>{{ paretoAbc.B.n }}</dd></div>
                 <div class="scr-stat"><dt><span class="rep-seg-dot s-c" />Cola (C)</dt><dd>{{ paretoAbc.C.n }}</dd></div>
               </dl>
-              <p class="rep-aside-foot">Las clase A concentran la mayor parte del ingreso: protegé su disponibilidad y su margen.</p>
+              <p class="rep-aside-foot">Las clase A concentran la mayor parte del ingreso: protege su disponibilidad y su margen.</p>
             </section>
           </aside>
         </div>
@@ -814,7 +846,74 @@ function periodLabel(p: string): string {
                 <div v-if="wasteTopReason" class="scr-stat"><dt>Costo de esa razón</dt><dd>{{ formatPEN(num(wasteTopReason.cost)) }}</dd></div>
                 <div class="scr-stat"><dt>Insumos afectados</dt><dd>{{ waste.data.value.byIngredient.length }}</dd></div>
               </dl>
-              <p class="rep-aside-foot">Registrá las salidas por merma desde Inventario para mantener el costeo y el food cost al día.</p>
+              <p class="rep-aside-foot">Registra las salidas por merma desde Inventario para mantener el costeo y el food cost al día.</p>
+            </section>
+          </aside>
+        </div>
+      </template>
+
+      <!-- ============================ PRECISIÓN (F2a / HU-08-08) ============================ -->
+      <template v-else-if="tab === 'precision'">
+        <div class="scr-body">
+          <div class="scr-main">
+            <RepError v-if="accuracy.error.value" @retry="accuracy.refresh()" />
+            <RepLoading v-else-if="accuracy.isLoading.value && !accuracy.data.value" />
+            <template v-else-if="accuracy.data.value">
+              <!-- needsMoreData: aún no transcurrieron suficientes días proyectados -->
+              <UiEmptyState
+                v-if="accuracy.data.value.needsMoreData"
+                icon="i-lucide-crosshair"
+                title="Aún no hay suficientes días para comparar"
+                :subtitle="accuracy.data.value.message ?? 'Aún no transcurrieron días proyectados para comparar el pronóstico con las ventas reales. Vuelve a revisar en unos días.'"
+              />
+              <template v-else>
+                <div class="rep-stat-grid three">
+                  <div class="rep-stat accent">
+                    <span class="rep-stat-k">Error promedio realizado</span>
+                    <span class="rep-stat-v">{{ accSmapeLabel }}</span>
+                    <span class="rep-stat-meta">sMAPE — error porcentual simétrico; más bajo es más preciso</span>
+                  </div>
+                  <div class="rep-stat">
+                    <span class="rep-stat-k">Cobertura del rango</span>
+                    <span class="rep-stat-v">{{ accCoverageDays ? `${accCoverageDays.inRange}/${accCoverageDays.total}` : '—' }}</span>
+                    <span class="rep-stat-meta">días reales dentro del rango proyectado</span>
+                  </div>
+                  <div class="rep-stat">
+                    <span class="rep-stat-k">Corridas evaluadas</span>
+                    <span class="rep-stat-v">{{ accuracy.data.value.runsEvaluated }}</span>
+                    <span class="rep-stat-meta">{{ accMetrics?.points ?? 0 }} día{{ (accMetrics?.points ?? 0) === 1 ? '' : 's' }} comparado{{ (accMetrics?.points ?? 0) === 1 ? '' : 's' }}</span>
+                  </div>
+                </div>
+
+                <section class="rep-card">
+                  <div class="rep-card-head">
+                    <div class="rep-card-title">Predicho vs. real</div>
+                    <span class="rep-card-meta">MAPE {{ accMapeLabel }}</span>
+                  </div>
+                  <p class="rep-hint">
+                    <UIcon name="i-lucide-info" />
+                    El sistema se autoevalúa: compara lo que predijo con lo que realmente se vendió, día a día, para las fechas ya transcurridas. La banda sombreada es el rango proyectado.
+                  </p>
+                  <ChartsAccuracyChart v-if="accSeries.length >= 2" :series="accSeries" />
+                  <p v-else class="rep-muted">Se necesitan al menos 2 días comparables para graficar la tendencia.</p>
+                </section>
+              </template>
+            </template>
+          </div>
+
+          <aside v-if="accuracy.data.value && !accuracy.data.value.needsMoreData" class="scr-aside">
+            <section class="scr-panel">
+              <header class="scr-panel-head">
+                <span class="scr-eyebrow">Precisión del pronóstico</span>
+                <h3 class="scr-panel-title">{{ accSmapeLabel }}<span class="scr-of"> error prom.</span></h3>
+              </header>
+              <dl class="scr-stats">
+                <div class="scr-stat"><dt>Error promedio (sMAPE)</dt><dd>{{ accSmapeLabel }}</dd></div>
+                <div class="scr-stat"><dt>Error promedio (MAPE)</dt><dd>{{ accMapeLabel }}</dd></div>
+                <div v-if="accCoverageDays" class="scr-stat"><dt>Días dentro del rango</dt><dd>{{ accCoverageDays.inRange }}/{{ accCoverageDays.total }} ({{ accCoverageDays.pct.toFixed(0) }}%)</dd></div>
+                <div class="scr-stat"><dt>Corridas evaluadas</dt><dd>{{ accuracy.data.value.runsEvaluated }}</dd></div>
+              </dl>
+              <p class="rep-aside-foot">sMAPE (error porcentual absoluto simétrico) mide qué tan lejos estuvo la predicción de la venta real, día a día; MAPE es el estándar equivalente más conocido.</p>
             </section>
           </aside>
         </div>

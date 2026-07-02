@@ -202,6 +202,9 @@ export function useClearPurchased() {
 
 // ===== Forecast-driven shopping suggestions (Widget A — E08 / core-ai) =====
 
+/** Default forecast window for the shopping list (unchanged since before F2a). */
+const DEFAULT_SHOPPING_HORIZON_DAYS = 14;
+
 /**
  * Returns demand-forecast shopping suggestions from the backend forecasting
  * service. When `needsForecast` is true the core-ai model has not produced a
@@ -211,14 +214,23 @@ export function useClearPurchased() {
  * The returned `suggestions` are already merged with the client-side checked
  * overlay (same `shopping-overlay` useState as `useShoppingList`) so the
  * register-purchase flow works without changes.
+ *
+ * @param horizonDays Forecast window in days (default 14, matching the
+ *   backend default). F2a's "S/ en riesgo esta semana" widget calls this a
+ *   second time with `7` to get a genuinely weekly figure — distinct from
+ *   the broader purchase-planning list — instead of reusing the same
+ *   14-day query and mislabeling it "this week".
  */
-export function useForecastShoppingSuggestions() {
+export function useForecastShoppingSuggestions(
+  horizonDays: MaybeRefOrGetter<number> = DEFAULT_SHOPPING_HORIZON_DAYS,
+) {
   const overlay = useShoppingOverlay();
   const query = useQuery({
-    key: ["forecast-shopping-suggestions"],
+    key: () => ["forecast-shopping-suggestions", toValue(horizonDays)] as const,
     query: () =>
       $fetch<ApiResponse<ForecastShoppingSuggestionsView>>(
         "/api/forecasting/shopping-suggestions",
+        { query: { horizon: toValue(horizonDays) } },
       ).then((r) => r.data),
   });
 
@@ -257,9 +269,15 @@ export function useForecastShoppingSuggestions() {
 
 /**
  * Real stock coverage in days for the given ingredient, derived from the
- * backend's 30-day average consumption. Use this instead of the local heuristic
+ * backend's 30-day average consumption, extended with shelf-life/freshness
+ * data (B4 — F3 "Vida útil" widget). Use this instead of the local heuristic
  * `status → hardcoded days`. When `data.daysLeft` is null, show
  * "sin consumo reciente para estimar" — do NOT default to a placeholder number.
+ * `data.effectiveCoverageDays` (`min(daysLeft, daysUntilExpiry)`) is the
+ * headline figure to present — whichever constraint (running out vs.
+ * spoiling) is tighter. `data.freshnessStatus === null` means there is no
+ * purchase to anchor a freshness estimate on; the "Vida útil" widget should
+ * degrade to a discreet "sin datos" state rather than disappearing abruptly.
  */
 export function useIngredientCoverage(ingredientId: MaybeRefOrGetter<string>) {
   return useQuery({

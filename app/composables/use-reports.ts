@@ -1,5 +1,8 @@
 import type { ApiResponse } from "#shared/types/api";
-import type { ForecastInsightsView } from "#shared/types/domain";
+import type {
+  ForecastAccuracyView,
+  ForecastInsightsView,
+} from "#shared/types/domain";
 import type { CashierDashboardView } from "~~/server/api/reports/dashboard/cashier.get";
 import type { ManagerDashboardView } from "~~/server/api/reports/dashboard/manager.get";
 import type { AdminDashboardView } from "~~/server/api/reports/dashboard/admin.get";
@@ -169,6 +172,34 @@ export function useForecastInsights(enabled?: MaybeRefOrGetter<boolean>) {
       $fetch<ApiResponse<ForecastInsightsView>>(
         "/api/forecasting/insights",
       ).then((r) => r.data),
+  });
+}
+
+/**
+ * F2a / HU-08-08 · "El sistema se autoevalúa": predicho vs. real día a día,
+ * combinando TODAS las corridas completadas del ámbito (`scope`+`menuItemId`,
+ * mismo shape que `/predictions`). owner/manager only — el backend devuelve
+ * 403 a staff, así que el caller SIEMPRE debe pasar un `enabled` gateado por
+ * rol (mismo patrón que `useForecastInsights`). `scope` default `'total'`.
+ */
+export function useForecastAccuracy(
+  scope: MaybeRefOrGetter<string> = "total",
+  menuItemId?: MaybeRefOrGetter<string | undefined>,
+  enabled?: MaybeRefOrGetter<boolean>,
+) {
+  return useQuery({
+    key: () =>
+      [
+        "forecasting",
+        "accuracy",
+        toValue(scope),
+        toValue(menuItemId) ?? "",
+      ] as const,
+    enabled: enabledGetter(enabled),
+    query: () =>
+      $fetch<ApiResponse<ForecastAccuracyView>>("/api/forecasting/accuracy", {
+        query: { scope: toValue(scope), menuItemId: toValue(menuItemId) },
+      }).then((r) => r.data),
   });
 }
 
