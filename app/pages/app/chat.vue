@@ -58,7 +58,7 @@ const CATEGORIES: QueryCategory[] = [
     label: 'Tendencias',
     questions: [
       '¿Cómo van las ventas de este mes?',
-      'Comparame este mes con el anterior',
+      'Compárame este mes con el anterior',
       '¿Qué día de la semana vendo más?',
     ],
   },
