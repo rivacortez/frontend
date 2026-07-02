@@ -152,12 +152,18 @@ const qrCells = computed(() => {
 
       <!-- Desglose -->
       <section v-if="showDesglose" class="cb-desglose">
-        <div class="row"><span class="lbl">Subtotal</span><span class="val">{{ formatPEN(subtotal) }}</span></div>
-        <div class="row"><span class="lbl">IGV (18 %)</span><span class="val">{{ formatPEN(igv) }}</span></div>
+        <!-- Con descuento: mostrar bruto → descuento (con motivo) → subtotal/IGV. -->
+        <div v-if="order.discount" class="row"><span class="lbl">Total bruto</span><span class="val">{{ formatPEN(totals.gross) }}</span></div>
         <div v-if="order.discount" class="row dsc">
-          <span class="lbl">Descuento</span>
+          <span class="lbl">
+            Descuento
+            <span v-if="order.discount.type === 'pct'" class="cb-dsc-tag">{{ order.discount.value }}%</span>
+            <span v-if="order.discount.reason" class="cb-dsc-reason">· {{ order.discount.reason }}</span>
+          </span>
           <span class="val">− {{ formatPEN(totals.discount) }}</span>
         </div>
+        <div class="row"><span class="lbl">Subtotal</span><span class="val">{{ formatPEN(subtotal) }}</span></div>
+        <div class="row"><span class="lbl">IGV (18 %)</span><span class="val">{{ formatPEN(igv) }}</span></div>
         <div v-if="withServicio" class="row"><span class="lbl">Servicio (10 %)</span><span class="val">{{ formatPEN(servicio) }}</span></div>
       </section>
 
@@ -319,6 +325,12 @@ const qrCells = computed(() => {
 }
 .cb-desglose .row .val { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg1); }
 .cb-desglose .row.dsc .val { color: var(--terracotta-700); }
+.cb-dsc-tag {
+  font-size: 10.5px; font-weight: 700;
+  background: var(--terracotta-100); color: var(--terracotta-700);
+  padding: 1px 6px; border-radius: 999px; margin-left: 4px;
+}
+.cb-dsc-reason { color: var(--fg3); font-weight: 500; }
 
 .cb-servicio {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

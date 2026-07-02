@@ -12,7 +12,8 @@ const emit = defineEmits<{
 const open = defineModel<boolean>({ required: true })
 
 const toast = useToast()
-const patchOrder = usePatchOrder()
+const applyDiscount = useApplyDiscount()
+const removeDiscount = useRemoveDiscount()
 
 const REASONS = [
   { id: 'cortesia', label: 'Cortesía de la casa' },
@@ -31,10 +32,38 @@ const reason = ref('')
 const otherText = ref('')
 const busy = ref(false)
 
+// Descuento ya aplicado a la orden (el backend lo persiste). Si existe, la
+// pantalla lo precarga y ofrece quitarlo.
+const existing = computed(() => props.order.discount ?? null)
+
+// El descuento se calcula SOLO sobre lo ya enviado a cocina (`order.items`):
+// es la única base que el backend conoce y sobre la que puede cobrar. Los
+// ítems "por enviar" (carrito local de la pantalla de mesa) todavía no son
+// parte de la orden — no tiene sentido descontarlos antes de enviarlos. Esta
+// pantalla lo comunica explícitamente en vez de mostrar un "S/0.00" mudo
+// (QA-05: fix de presentación; NO combina el carrito local en este total).
 const total = computed(() => props.order.items.reduce((s, it) => s + it.qty * it.unitPrice, 0))
+const hasSentItems = computed(() => props.order.items.length > 0)
+
+// Motivo canónico → id del selector (los que no coinciden caen a "otro").
+function reasonToId(label: string | undefined): string {
+  if (!label) return ''
+  return REASONS.find(r => r.label === label && r.id !== 'otro')?.id ?? 'otro'
+}
 
 watch(open, (isOpen) => {
-  if (isOpen) {
+  if (!isOpen) return
+  const d = existing.value
+  if (d) {
+    // Precarga el descuento vigente para editarlo o quitarlo.
+    mode.value = d.type === 'pct' ? 'percent' : 'amount'
+    pct.value = d.type === 'pct' ? d.value : 10
+    amt.value = d.type === 'amount' ? String(d.value) : ''
+    const id = reasonToId(d.reason)
+    reason.value = id
+    otherText.value = id === 'otro' ? (d.reason ?? '') : ''
+  }
+  else {
     mode.value = 'percent'
     pct.value = 10
     amt.value = ''
@@ -58,11 +87,14 @@ const hasDiscount = computed(() => discount.value > 0.005)
 
 const reasonOk = computed(() => reason.value !== '' && (reason.value !== 'otro' || otherText.value.trim().length > 0))
 const amountOk = computed(() => mode.value === 'percent' ? pctNum.value > 0 : (amtNum.value > 0 && !amtOver.value))
-const canApply = computed(() => amountOk.value && reasonOk.value)
+// Sin ítems enviados a cocina no hay base sobre la cual descontar — bloquea la
+// aplicación en vez de dejar pasar un "10%" que numéricamente da S/0.00 (QA-05).
+const canApply = computed(() => hasSentItems.value && amountOk.value && reasonOk.value)
 
 const sliderFill = computed(() => `${(pctNum.value / 50) * 100}%`)
 
 const hint = computed(() => {
+  if (!hasSentItems.value) return 'Aún no hay ítems enviados a cocina para descontar.'
   if (!amountOk.value) {
     if (mode.value === 'percent') return 'Ingresa un porcentaje mayor a 0.'
     return amtOver.value ? 'Monto excede el total.' : 'Ingresa un monto a descontar.'
@@ -74,21 +106,55 @@ async function apply(close: () => void): Promise<void> {
   if (!canApply.value || busy.value) return
   busy.value = true
   try {
-    const reasonLabel = reason.value === 'otro'
+    // Motivo obligatorio para el backend (min length 1). El label del select o el
+    // texto libre en "Otro…".
+    const reasonLabel = (reason.value === 'otro'
       ? otherText.value.trim()
-      : REASONS.find(r => r.id === reason.value)?.label
-    await patchOrder.mutateAsync({
-      orderId: props.order.id,
-      discount: mode.value === 'percent'
-        ? { type: 'pct', value: pctNum.value, reason: reasonLabel }
-        : { type: 'amount', value: +discount.value.toFixed(2), reason: reasonLabel },
-    })
+      : REASONS.find(r => r.id === reason.value)?.label) ?? ''
+    // El backend calcula el monto/total autoritativo; enviamos type/value/reason
+    // y confiamos en su respuesta (que refresca `order.discount`).
+    await applyDiscount.mutateAsync(
+      mode.value === 'percent'
+        ? { orderId: props.order.id, type: 'pct', value: pctNum.value, reason: reasonLabel }
+        : { orderId: props.order.id, type: 'amount', value: +amtNum.value.toFixed(2), reason: reasonLabel },
+    )
+    // Toast de éxito SOLO tras 2xx.
     toast.add({
-      title: `Descuento de ${mode.value === 'percent' ? `${pctNum.value} %` : formatPEN(discount.value)} aplicado`,
+      title: `Descuento de ${mode.value === 'percent' ? `${pctNum.value} %` : formatPEN(amtNum.value)} aplicado`,
       icon: 'i-lucide-badge-percent',
     })
     close()
     emit('applied')
+  }
+  catch (e) {
+    // 403 (staff sin permiso) y 400 (monto > bruto) se muestran con el mensaje
+    // real del backend; el resto cae a un mensaje genérico.
+    toast.add({
+      title: errorMessage(e, 'No se pudo aplicar el descuento'),
+      icon: 'i-lucide-alert-triangle',
+      color: 'error',
+    })
+  }
+  finally {
+    busy.value = false
+  }
+}
+
+async function remove(close: () => void): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await removeDiscount.mutateAsync(props.order.id)
+    toast.add({ title: 'Descuento quitado', icon: 'i-lucide-badge-x' })
+    close()
+    emit('applied')
+  }
+  catch (e) {
+    toast.add({
+      title: errorMessage(e, 'No se pudo quitar el descuento'),
+      icon: 'i-lucide-alert-triangle',
+      color: 'error',
+    })
   }
   finally {
     busy.value = false
@@ -105,9 +171,19 @@ async function apply(close: () => void): Promise<void> {
           <UIcon name="i-lucide-shield-check" /> Owner
         </span>
       </h2>
-      <div class="sheet-sub">Total actual {{ formatPEN(total) }}</div>
+      <!-- El total SIEMPRE aclara su alcance: solo lo enviado a cocina, nunca el
+           carrito "por enviar" (el backend todavía no conoce esos ítems). -->
+      <div class="sheet-sub">Total actual {{ formatPEN(total) }} · solo ítems enviados a cocina</div>
     </template>
 
+    <!-- Sin base: nada enviado a cocina todavía -->
+    <div v-if="!hasSentItems" class="dsc-empty" role="status">
+      <UIcon name="i-lucide-chef-hat" />
+      <p class="dsc-empty-title">Aún no hay ítems enviados a cocina</p>
+      <p class="dsc-empty-sub">El descuento se aplica sobre lo enviado a cocina. Envía el pedido y vuelve a abrir esta pantalla.</p>
+    </div>
+
+    <template v-else>
     <!-- Tipo -->
     <div class="dsc-toggle" role="tablist" aria-label="Tipo de descuento">
       <button type="button" role="tab" :aria-selected="mode === 'percent'" :class="{ on: mode === 'percent' }" @click="mode = 'percent'">
@@ -235,15 +311,26 @@ async function apply(close: () => void): Promise<void> {
         aria-label="Motivo personalizado"
       >
     </section>
+    </template>
 
     <template #cta="{ close }">
-      <div v-if="!canApply" class="dsc-cta-hint" role="status">
+      <div v-if="hasSentItems && !canApply" class="dsc-cta-hint" role="status">
         <UIcon name="i-lucide-info" /> {{ hint }}
       </div>
+      <!-- Con descuento vigente: permitir quitarlo, además de reemplazarlo. -->
+      <button
+        v-if="existing"
+        type="button"
+        class="dsc-remove-btn"
+        :disabled="busy"
+        @click="remove(close)"
+      >
+        <UIcon name="i-lucide-badge-x" /> Quitar descuento actual
+      </button>
       <div class="dsc-cta-row">
         <button type="button" class="btn btn-ghost" @click="close">Cancelar</button>
         <button type="button" class="btn btn-primary" :disabled="!canApply || busy" @click="apply(close)">
-          <UIcon name="i-lucide-check" /> Aplicar descuento
+          <UIcon name="i-lucide-check" /> {{ existing ? 'Actualizar descuento' : 'Aplicar descuento' }}
         </button>
       </div>
     </template>
@@ -251,6 +338,17 @@ async function apply(close: () => void): Promise<void> {
 </template>
 
 <style scoped>
+/* Sin ítems enviados a cocina: no hay base para descontar (QA-05) */
+.dsc-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 6px;
+  padding: 32px 16px;
+  color: var(--fg2);
+}
+.dsc-empty > .iconify { width: 28px; height: 28px; color: var(--fg3); margin-bottom: 4px; }
+.dsc-empty-title { font-size: 14.5px; font-weight: 600; color: var(--fg1); margin: 0; }
+.dsc-empty-sub { font-size: 12.5px; color: var(--fg3); line-height: 1.5; max-width: 34ch; margin: 0; }
+
 .dsc-title-row { display: flex; align-items: center; gap: 8px; }
 .dsc-owner-pill {
   display: inline-flex; align-items: center; gap: 4px;
@@ -419,4 +517,14 @@ async function apply(close: () => void): Promise<void> {
 .dsc-cta-hint .iconify { width: 13px; height: 13px; }
 .dsc-cta-row { display: grid; grid-template-columns: auto 1fr; gap: 10px; }
 .dsc-cta-row .btn { min-height: 48px; border-radius: 12px; justify-content: center; font-size: 14px; }
+.dsc-remove-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; margin-bottom: 10px;
+  background: transparent; border: 1px solid var(--danger);
+  color: var(--danger);
+  font: inherit; font-size: 13px; font-weight: 600;
+  padding: 10px; border-radius: 12px; cursor: pointer; min-height: 44px;
+}
+.dsc-remove-btn:disabled { opacity: 0.6; cursor: default; }
+.dsc-remove-btn .iconify { width: 15px; height: 15px; }
 </style>

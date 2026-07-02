@@ -19,6 +19,12 @@ const isOwner = computed(() => user.value?.role === 'owner')
 
 useSeoMeta({ title: () => `Mesa ${table.value ? String(table.value.number).padStart(2, '0') : ''} — GastronomIA` })
 
+const pad = (n: number | undefined): string => String(n ?? '').padStart(2, '0')
+
+// `definePageHeader` runs its getter synchronously (via watchEffect) during setup,
+// so `pad` MUST be declared above this call — otherwise it's a TDZ ReferenceError
+// on every mount (the header silently falls back to "Mesa 01" and the composable
+// throws 3 Vue warnings, since `const` bindings are not hoisted like `function`).
 definePageHeader(() => ({
   title: table.value ? `Mesa ${pad(table.value.number)}` : 'Mesa',
   subtitle: table.value ? `${table.value.zone} · ${table.value.guests ?? '—'} personas` : undefined,
@@ -62,8 +68,6 @@ const PILL: Record<OrderItem['status'], { label: string, cls: string }> = {
   preparing: { label: 'En cocina', cls: 'cooking' },
   served: { label: 'Servido', cls: 'served' },
 }
-
-const pad = (n: number | undefined): string => String(n ?? '').padStart(2, '0')
 
 // ===== Catálogo → carrito =====
 function onCatalogConfirm(items: Array<{ recipeId: string, qty: number }>): void {

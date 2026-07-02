@@ -61,6 +61,17 @@ interface BeOrderItemView {
   modifiers: { name: string; priceDelta: number }[];
   status: string;
 }
+// Descuento capturado en la orden (E04): value string (Decimal). El monto en
+// soles resuelto (`amount`) solo lo devuelven las vistas calculadas.
+interface BeOrderDiscount {
+  type: "pct" | "amount";
+  value: string;
+  reason: string | null;
+}
+// Descuento en las vistas calculadas (pre-bill/split/sale): incluye `amount`.
+interface BeViewDiscount extends BeOrderDiscount {
+  amount: string;
+}
 interface BeOrderView {
   id: string;
   tableId: string;
@@ -70,6 +81,7 @@ interface BeOrderView {
   openedAt: string;
   items: BeOrderItemView[];
   subtotal: string;
+  discount?: BeOrderDiscount | null;
 }
 interface BeMenuItem {
   id: string;
@@ -100,6 +112,8 @@ interface BeSaleView {
   date: string;
   tableLabel: string;
   items: BeSaleItemView[];
+  grossTotal?: string;
+  discount?: BeViewDiscount | null;
   subtotal: string;
   igv: string;
   total: string;
@@ -117,6 +131,8 @@ export interface BePreBillView {
   orderId: string;
   tableCode: string;
   items: BePreBillItem[];
+  grossTotal: string;
+  discount: BeViewDiscount | null;
   subtotal: string;
   igv: string;
   total: string;
@@ -130,6 +146,8 @@ export interface BeSplitShare {
 export interface BeSplitView {
   orderId: string;
   mode: "equal" | "items";
+  grossTotal: string;
+  discount: BeViewDiscount | null;
   shares: BeSplitShare[];
   total: string;
 }
@@ -222,8 +240,16 @@ function toOrder(o: BeOrderView, recipeByItem: Map<string, string>): Order {
     tableId: o.tableId,
     openedAt: o.openedAt,
     items: o.items.map((it) => toOrderItem(it, recipeByItem)),
-    // discount + payments viven en E04 (billing); aún no existen en el backend.
-    discount: undefined,
+    // E04 (billing): el descuento ya existe en el backend (POST/DELETE
+    // /orders/:id/discount). value llega como string Decimal → number.
+    discount: o.discount
+      ? {
+          type: o.discount.type,
+          value: num(o.discount.value),
+          reason: o.discount.reason ?? undefined,
+        }
+      : undefined,
+    // Los pagos se materializan al cobrar (Sale); la orden abierta no los expone.
     payments: [],
     status: toOrderStatus(o.status),
   };
@@ -262,6 +288,17 @@ export function toFrontendSale(s: BeSaleView): Sale {
       unitPrice: num(it.unitPrice),
       total: num(it.total),
     })),
+    // Descuento del comprobante (E04): grossTotal + descuento con su amount
+    // resuelto. Solo presente cuando la venta llevó descuento.
+    grossTotal: s.grossTotal != null ? num(s.grossTotal) : undefined,
+    discount: s.discount
+      ? {
+          type: s.discount.type,
+          value: num(s.discount.value),
+          reason: s.discount.reason ?? undefined,
+          amount: num(s.discount.amount),
+        }
+      : null,
     subtotal: num(s.subtotal),
     igv: num(s.igv),
     total: num(s.total),
@@ -271,9 +308,40 @@ export function toFrontendSale(s: BeSaleView): Sale {
 }
 
 // ---- Listado de mesas (GET /api/tables) ----
-export async function listTables(event: H3Event): Promise<DiningTable[]> {
+// Extraído para reutilizar el MISMO listado (y por lo tanto el mismo índice
+// estable) desde `getTableDetail`/`patchTable`: el backend expone `code`
+// alfanumérico (p. ej. "S1", "T2"), no un número de mesa — `toDiningTable`
+// solo puede derivar uno numéricamente estable a partir de la posición de
+// esta mesa en el listado completo.
+async function fetchTablesRaw(event: H3Event): Promise<BeTableView[]> {
   const res = await backendFetch<Envelope<BeTableView[]>>(event, "/api/tables");
-  return res.data.map((t, i) => toDiningTable(t, i));
+  return res.data;
+}
+
+export async function listTables(event: H3Event): Promise<DiningTable[]> {
+  const rows = await fetchTablesRaw(event);
+  return rows.map((t, i) => toDiningTable(t, i));
+}
+
+/**
+ * Resuelve el índice de `id` dentro del listado completo de mesas — la MISMA
+ * fuente de verdad que usa `listTables()` para derivar `DiningTable.number`.
+ *
+ * POR QUÉ: bug real (QA-03) — antes, `getTableDetail`/`patchTable` pasaban un
+ * índice hardcodeado `0` a `toDiningTable` (comentario original: "no tenemos
+ * el índice del listado → caemos a 0"). Como el `code` del backend es
+ * alfanumérico ("S1", "T2"...), `Number.parseInt` siempre da `NaN` y CADA
+ * mesa individual caía al fallback `index + 1` = **1** — el header de mesa
+ * mostraba "Mesa 01" sin importar qué mesa se abriera. Re-consultar el
+ * listado aquí garantiza que el número mostrado en el detalle coincida
+ * siempre con el que ya se ve en la grilla de mesas del POS.
+ *
+ * @returns El índice de la mesa en el listado, o `-1` si no aparece (p. ej.
+ *   fue borrada entre el fetch del listado y este); el caller decide el
+ *   fallback.
+ */
+function findTableIndex(rows: BeTableView[], id: string): number {
+  return rows.findIndex((t) => t.id === id);
 }
 
 // ---- Detalle de mesa (GET /api/tables/:id → {table, order}) ----
@@ -281,13 +349,13 @@ export async function getTableDetail(
   event: H3Event,
   id: string,
 ): Promise<{ table: DiningTable; order: Order | null }> {
-  const [res, maps] = await Promise.all([
+  const [res, maps, allTables] = await Promise.all([
     backendFetch<Envelope<BeTableDetail>>(event, `/api/tables/${id}`),
     fetchMenuMaps(event),
+    fetchTablesRaw(event),
   ]);
-  // El número de mesa en el detalle: si el code no es numérico, no tenemos el
-  // índice del listado → caemos a 0 (la UI usa principalmente el code numérico).
-  const table = toDiningTable(res.data.table, 0);
+  const index = findTableIndex(allTables, id);
+  const table = toDiningTable(res.data.table, index === -1 ? 0 : index);
   const order = res.data.order
     ? toOrder(res.data.order, maps.recipeByItem)
     : null;
@@ -356,7 +424,6 @@ export interface OrderItemUpdate {
 }
 
 export interface PatchOrderBody {
-  discount?: { type: "pct" | "amount"; value: number; reason?: string } | null;
   itemUpdates?: OrderItemUpdate[];
   status?: "open" | "void";
   voidReason?: string;
@@ -400,10 +467,55 @@ export async function patchOrder(
     );
   }
 
-  // 3) `discount` no se envía: no hay campo en el backend aún (E04). Se acepta e ignora.
+  // El descuento NO se maneja aquí: tiene su propio endpoint dedicado
+  // (POST/DELETE /api/orders/:id/discount) → ver applyDiscount/removeDiscount.
 
   // Devuelve la orden fresca ya mapeada.
   return getOrder(event, orderId);
+}
+
+// ---- E04 · Descuento (HU-04) — manager/owner (staff → 403) ----
+export interface ApplyDiscountBody {
+  type: "pct" | "amount";
+  value: number;
+  reason: string;
+}
+/**
+ * Aplica un descuento a la orden: POST /api/orders/:id/discount.
+ * El backend valida rol (manager/owner → staff recibe 403) y monto (400 si un
+ * descuento por monto excede el bruto). Devuelve la orden fresca ya mapeada
+ * (con `order.discount` poblado), para que la UI refleje el estado real.
+ */
+export async function applyDiscount(
+  event: H3Event,
+  orderId: string,
+  body: ApplyDiscountBody,
+): Promise<Order> {
+  const [res, maps] = await Promise.all([
+    backendFetch<Envelope<BeOrderView>>(
+      event,
+      `/api/orders/${orderId}/discount`,
+      { method: "POST", body: { ...body } },
+    ),
+    fetchMenuMaps(event),
+  ]);
+  return toOrder(res.data, maps.recipeByItem);
+}
+
+/** Quita el descuento de la orden: DELETE /api/orders/:id/discount. */
+export async function removeDiscount(
+  event: H3Event,
+  orderId: string,
+): Promise<Order> {
+  const [res, maps] = await Promise.all([
+    backendFetch<Envelope<BeOrderView>>(
+      event,
+      `/api/orders/${orderId}/discount`,
+      { method: "DELETE" },
+    ),
+    fetchMenuMaps(event),
+  ]);
+  return toOrder(res.data, maps.recipeByItem);
 }
 
 // ---- Pre-cuenta / pedir cuenta: PATCH /api/tables/:id {status} ----
@@ -421,11 +533,12 @@ export async function patchTable(
       body: { status: body.status },
     });
   }
-  const res = await backendFetch<Envelope<BeTableView>>(
-    event,
-    `/api/tables/${id}`,
-  );
-  return toDiningTable(res.data, 0);
+  const [res, allTables] = await Promise.all([
+    backendFetch<Envelope<BeTableView>>(event, `/api/tables/${id}`),
+    fetchTablesRaw(event),
+  ]);
+  const index = findTableIndex(allTables, id);
+  return toDiningTable(res.data, index === -1 ? 0 : index);
 }
 
 // ---- Enviar a cocina (HU-03-06): POST /api/orders/:id/send-to-kitchen ----

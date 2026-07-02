@@ -107,6 +107,16 @@ function print(): void {
         <div class="ticket-divider" aria-hidden="true" />
 
         <div class="ticket-totals">
+          <template v-if="sale.discount">
+            <div class="row"><span>Total bruto</span><span>{{ formatPEN(sale.grossTotal ?? 0) }}</span></div>
+            <div class="row dsc">
+              <span>
+                Descuento<template v-if="sale.discount.type === 'pct'"> ({{ sale.discount.value }}%)</template>
+                <template v-if="sale.discount.reason"> · {{ sale.discount.reason }}</template>
+              </span>
+              <span>− {{ formatPEN(sale.discount.amount) }}</span>
+            </div>
+          </template>
           <div class="row"><span>Subtotal</span><span>{{ formatPEN(sale.subtotal) }}</span></div>
           <div class="row"><span>IGV (18 %)</span><span>{{ formatPEN(sale.igv) }}</span></div>
           <div class="row grand"><span>Total</span><span>{{ formatPEN(sale.total) }}</span></div>
@@ -255,6 +265,7 @@ function print(): void {
   padding: 2px 0;
   font-variant-numeric: tabular-nums;
 }
+.ticket-totals .row.dsc { color: var(--terracotta-700); font-weight: 600; }
 .ticket-totals .row.grand {
   font-size: 17px; font-weight: 700; color: var(--fg1);
   padding-top: 8px;

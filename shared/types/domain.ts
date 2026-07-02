@@ -99,6 +99,27 @@ export interface OrderDiscount {
   reason?: string;
 }
 
+/**
+ * Descuento tal como aparece en las vistas CALCULADAS (pre-cuenta, división y
+ * comprobante): además del `type`/`value`/`reason` capturados, incluye el
+ * `amount` en soles que el backend efectivamente restó del bruto ANTES de
+ * partir el IGV. Convención de moneda: string en las vistas de moneda-string
+ * (PreBill/SplitResult) y number en `Sale` (que ya convierte a number).
+ */
+export interface PreBillDiscount {
+  type: DiscountType;
+  value: string;
+  reason?: string;
+  amount: string;
+}
+
+export interface SaleDiscount {
+  type: DiscountType;
+  value: number;
+  reason?: string;
+  amount: number;
+}
+
 export type PaymentMethod = "cash" | "card" | "yape" | "plin";
 
 export interface OrderPayment {
@@ -140,6 +161,10 @@ export interface Sale {
   customer?: string;
   customerDoc?: string;
   items: SaleItem[];
+  // `grossTotal`/`discount` solo vienen cuando la venta llevó descuento (E04);
+  // `subtotal`/`igv`/`total` ya reflejan el descuento restado.
+  grossTotal?: number;
+  discount?: SaleDiscount | null;
   subtotal: number;
   igv: number;
   total: number;
@@ -160,6 +185,10 @@ export interface PreBill {
   orderId: string;
   tableCode: string;
   items: PreBillLine[];
+  // Bruto (antes de descuento) + descuento aplicado. `subtotal`/`igv`/`total`
+  // ya vienen con el descuento restado ANTES de partir el IGV.
+  grossTotal: string;
+  discount: PreBillDiscount | null;
   subtotal: string;
   igv: string;
   total: string;
@@ -176,6 +205,10 @@ export interface SplitShare {
 export interface SplitResult {
   orderId: string;
   mode: "equal" | "items";
+  // Bruto + descuento del pedido; el backend reparte el total YA con descuento
+  // de forma proporcional entre las partes (`shares`).
+  grossTotal: string;
+  discount: PreBillDiscount | null;
   shares: SplitShare[];
   total: string;
 }
