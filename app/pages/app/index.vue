@@ -31,7 +31,8 @@ definePageHeader(() => ({
 const isOwner = computed(() => user.value?.role === 'owner')
 const isManager = computed(() => user.value?.role === 'manager')
 const canManage = computed(() => isOwner.value || isManager.value)
-const num = (s: string | number | undefined | null): number => Number(s ?? 0)
+// Decimal strings from the backend (Prisma `Decimal`) — see app/utils/format.ts.
+const num = (s: string | number | undefined | null): number => toNumber(s)
 
 const admin = useAdminDashboard(() => isOwner.value)
 // Gate manager dashboard so it only fires for the manager role. The owner
@@ -58,9 +59,18 @@ const ordersToday = computed<number>(() => {
   return cashier.data.value?.salesCount ?? 0
 })
 
+// Ocupación: derivada del listado REAL de mesas (`useTables`), no de
+// `manager.data.openTables`. Bug real (QA-04): ese campo solo existe en
+// `ManagerDashboardView`, y `manager` se gatea con `enabled: canManage &&
+// !isOwner` (línea arriba) — para el rol owner esa query NUNCA se dispara, así
+// que `manager.data.value` queda `undefined` para siempre y el KPI mostraba
+// "0/10 · 0%" aunque el POS tuviera mesas ocupadas. `tables` ya se carga sin
+// gate de rol, así que contar por `status` es la fuente de verdad correcta
+// para owner Y manager, sin pedirle un campo extra al backend.
 const occupancy = computed(() => {
-  const active = manager.data.value?.openTables ?? 0
-  const total = tables.data.value?.length ?? 0
+  const rows = tables.data.value ?? []
+  const total = rows.length
+  const active = rows.filter(t => t.status !== 'free').length
   const pct = total > 0 ? Math.round((active / total) * 100) : 0
   return { active, total, pct }
 })
@@ -145,7 +155,7 @@ const shortcuts = computed(() => [
             <p class="eyebrow">{{ revenueLabel }}</p>
             <span class="kpi-ico is-coral" aria-hidden="true"><UIcon name="i-lucide-wallet" /></span>
           </div>
-          <p class="stat kpi-num"><span class="cur">S/</span>{{ revenueToday.toLocaleString('es-PE') }}</p>
+          <p class="stat kpi-num"><span class="cur">S/</span>{{ revenueToday.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</p>
           <div v-if="hasSalesSeries" class="kpi-viz">
             <ChartsSparkline :values="salesSeries.map(p => p.value)" color="var(--terracotta)" :height="30" />
           </div>
@@ -211,7 +221,7 @@ const shortcuts = computed(() => [
       <div class="panel-head">
         <div class="trend-title">
           <span class="section-title">Ventas · últimos 7 días</span>
-          <p class="trend-total stat"><span class="cur">S/</span>{{ revenue7d.toLocaleString('es-PE') }}</p>
+          <p class="trend-total stat"><span class="cur">S/</span>{{ revenue7d.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</p>
         </div>
         <NuxtLink to="/app/reportes" class="link">Ver reportes</NuxtLink>
       </div>
