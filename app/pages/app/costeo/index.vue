@@ -49,7 +49,16 @@ function periodLabel(p: string): string {
   return date.toLocaleDateString('es-PE', { month: 'long', year: 'numeric' })
 }
 
-const num = (s: string | undefined): number => Number(s ?? 0)
+// Alias to the shared, NaN/Infinity-safe coercion (~/utils/format, auto-imported).
+// Defensive guard: this page previously had its own `Number(s ?? 0)` coercion,
+// which does NOT protect against non-finite results (e.g. a period with zero
+// units sold would make the backend's marginPct arrive as "Infinity"/"NaN").
+// A non-finite number reaching the `margin-*` sort comparators or `.toFixed()`
+// doesn't infinite-loop by itself, but it silently corrupts sort order and
+// renders "Infinity%" — using the shared, hardened `toNumber()` closes that gap
+// for any future data shape (e.g. an all-zero period) without duplicating logic
+// already fixed in prime-cost.vue / menu-engineering.vue / reportes/index.vue.
+const num = toNumber
 const isLowMargin = (d: DishCost): boolean => num(d.marginPct) < MARGIN_THRESHOLD
 const lowMarginCount = computed(() => dishes.value.filter(isLowMargin).length)
 

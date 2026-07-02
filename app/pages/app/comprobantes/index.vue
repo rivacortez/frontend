@@ -6,6 +6,9 @@ definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Comprobantes — GastronomIA' })
 
 const { data: sales } = useSales()
+// QA-07 · Total/conteo del día calendario (Lima) desde el backend — fuente
+// autoritativa, en vez de sumar toda la lista (que incluye el histórico).
+const { data: todaySummary } = useSalesTodaySummary()
 
 const query = ref('')
 const filter = ref<'all' | 'boleta' | 'factura' | 'void'>('all')
@@ -28,25 +31,35 @@ const counts = computed(() => ({
   void: all.value.filter(s => s.status === 'void').length,
 }))
 
-const issuedTotal = computed(() =>
-  all.value.filter(s => s.status === 'issued').reduce((sum, s) => sum + s.total, 0),
-)
+// Total y conteo del día (autoritativos del backend). Fallback a 0 mientras carga.
+const todayTotal = computed(() => toNumber(todaySummary.value?.total))
+const todayCount = computed(() => todaySummary.value?.count ?? 0)
 
-// Reparto por método de pago (solo emitidos), de mayor a menor monto.
+// Fecha (YYYY-MM-DD) en zona Lima de una venta — para acotar el desglose del día
+// al MISMO alcance que el total autoritativo (evita mezclar el histórico).
+function limaDay(iso: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date(iso))
+}
+// Ventas emitidas de HOY (día calendario Lima), según la fecha del summary.
+const todaySales = computed(() => {
+  const day = todaySummary.value?.date
+  if (!day) return []
+  return all.value.filter(s => s.status === 'issued' && limaDay(s.date) === day)
+})
+
+// Reparto por método de pago del DÍA, de mayor a menor monto.
 const byMethod = computed(() => {
   const acc = new Map<Sale['method'], number>()
-  for (const s of all.value) {
-    if (s.status !== 'issued') continue
+  for (const s of todaySales.value) {
     acc.set(s.method, (acc.get(s.method) ?? 0) + s.total)
   }
   return [...acc.entries()].sort((a, b) => b[1] - a[1])
 })
 
 const sparkPoints = computed(() => {
-  // distribución horaria del día con los totales reales
+  // distribución horaria del DÍA con los totales reales
   const buckets = [0, 0, 0, 0, 0, 0, 0]
-  for (const s of all.value) {
-    if (s.status !== 'issued') continue
+  for (const s of todaySales.value) {
     const hour = new Date(s.date).getHours()
     const idx = Math.min(6, Math.max(0, Math.floor((hour - 10) / 1.5)))
     const bucket = buckets[idx]
@@ -179,10 +192,10 @@ function onRowActivate(s: Sale): void {
         <section class="scr-panel" aria-label="Resumen del día">
           <header class="scr-panel-head">
             <span class="scr-eyebrow">Hoy</span>
-            <h2 class="scr-panel-title">{{ formatPEN(issuedTotal) }}</h2>
+            <h2 class="scr-panel-title">{{ formatPEN(todayTotal) }}</h2>
           </header>
           <div class="inv-sum-row">
-            <span class="inv-sum-sub">{{ all.length }} comprobantes emitidos</span>
+            <span class="inv-sum-sub">{{ todayCount }} {{ todayCount === 1 ? 'comprobante emitido' : 'comprobantes emitidos' }} hoy</span>
             <svg class="inv-spark" viewBox="0 0 92 44" aria-hidden="true">
               <path :d="`${sparkPath} L 90 42 L 2 42 Z`" fill="rgba(201,106,67,0.15)" />
               <path :d="sparkPath" fill="none" stroke="var(--terracotta)" stroke-width="2" stroke-linecap="round" />
@@ -237,6 +250,16 @@ function onRowActivate(s: Sale): void {
           </ul>
 
           <dl class="inv-detail-totals">
+            <template v-if="selected.discount">
+              <div class="row"><dt>Total bruto</dt><dd>{{ formatPEN(selected.grossTotal ?? 0) }}</dd></div>
+              <div class="row dsc">
+                <dt>
+                  Descuento<template v-if="selected.discount.type === 'pct'"> ({{ selected.discount.value }}%)</template>
+                  <template v-if="selected.discount.reason"> · {{ selected.discount.reason }}</template>
+                </dt>
+                <dd>− {{ formatPEN(selected.discount.amount) }}</dd>
+              </div>
+            </template>
             <div class="row"><dt>Subtotal</dt><dd>{{ formatPEN(selected.subtotal) }}</dd></div>
             <div class="row"><dt>IGV (18 %)</dt><dd>{{ formatPEN(selected.igv) }}</dd></div>
             <div class="row grand"><dt>Total</dt><dd>{{ formatPEN(selected.total) }}</dd></div>
@@ -418,6 +441,7 @@ function onRowActivate(s: Sale): void {
 .inv-detail-totals { margin: 0; }
 .inv-detail-totals dt { color: var(--fg2); }
 .inv-detail-totals dd { margin: 0; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.inv-detail-totals .row.dsc dt, .inv-detail-totals .row.dsc dd { color: var(--terracotta-700); font-weight: 600; }
 .inv-detail-totals .row.grand { padding-top: 8px; }
 .inv-detail-totals .row.grand dt { font-size: 14px; font-weight: 700; color: var(--fg1); }
 .inv-detail-totals .row.grand dd { font-size: 16px; font-weight: 700; color: var(--fg1); }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { InventoryMovement, MovementType, Recipe } from '#shared/types/domain'
+import type { InventoryMovement, MovementType } from '#shared/types/domain'
 
 definePageMeta({ layout: 'app' })
 
@@ -9,7 +9,9 @@ const toast = useToast()
 const ingredientId = computed(() => String(route.params.id))
 
 const { data: ingredients } = useIngredients()
-const { data: recipes } = useRecipes()
+// QA-06 · Recetas que usan este insumo — BOM real desde el backend (el listado
+// general de recetas trae items:[] a propósito, por eso no sirve para derivarlas).
+const { data: recipeUsages, isLoading: usagesLoading, error: usagesError } = useIngredientRecipes(ingredientId)
 const { data: movements } = useMovements(ingredientId)
 // Widget B: real consumption-based coverage (replaces the local heuristic).
 const { data: coverage } = useIngredientCoverage(ingredientId)
@@ -81,34 +83,40 @@ const isNoCost = computed(() => (product.value?.unitCost ?? 0) === 0)
 // endpoints /api/inventory/ingredients/:id/coverage and /api/inventory/price-trend/:id.
 // De-scope lifted by E08. See QA-STATUS/E08-status.md.
 
-/* ===== Recetas que lo usan ===== */
-interface RecipeUsage {
-  recipe: Recipe
+/* ===== Recetas que lo usan (QA-06) ===== */
+// Fila de display derivada del RecipeUsageView del backend. El % de impacto sale
+// de lineCost/recipeTotalCost (participación del insumo en el costo del plato);
+// la cantidad usa la unidad del insumo (g si es kg < 1 por porción).
+interface UsageRow {
+  recipeId: string
+  name: string
+  emoji: string
   qtyLabel: string
   impact: 'high' | 'mid' | 'low'
   estimated: boolean
 }
-const usages = computed<RecipeUsage[]>(() => {
-  const id = ingredientId.value
-  return (recipes.value ?? [])
-    .map((recipe) => {
-      const item = recipe.items.find(it => it.ingredientId === id)
-      if (!item) return null
-      const share = recipe.cost > 0 ? (item.cost * (1 + item.wastePct / 100)) / recipe.cost : 0
-      const qtyLabel = item.unit === 'kg' && item.qty < 1
-        ? `${Math.round(item.qty * 1000)} g por porción`
-        : `${item.qty} ${item.unit} por porción`
-      return {
-        recipe,
-        qtyLabel,
-        impact: share > 0.25 ? 'high' as const : share >= 0.1 ? 'mid' as const : 'low' as const,
-        estimated: recipe.items.some(it => it.cost === 0),
-      }
-    })
-    .filter((u): u is RecipeUsage => u !== null)
+const usages = computed<UsageRow[]>(() => {
+  const unit = product.value?.unit ?? ''
+  const noCost = isNoCost.value
+  return (recipeUsages.value ?? []).map((u) => {
+    const share = u.recipeTotalCost > 0 ? u.lineCost / u.recipeTotalCost : 0
+    const qtyLabel = unit === 'kg' && u.qty < 1
+      ? `${Math.round(u.qty * 1000)} g por porción`
+      : `${u.qty} ${unit} por porción`
+    return {
+      recipeId: u.recipeId,
+      name: u.name,
+      emoji: u.emoji ?? '🍽️',
+      qtyLabel,
+      impact: share > 0.25 ? 'high' as const : share >= 0.1 ? 'mid' as const : 'low' as const,
+      // Estimado cuando el insumo no tiene costo (o el plato no pudo costearse):
+      // el % de impacto no es fiable en ese caso.
+      estimated: noCost || u.lineCost === 0,
+    }
+  })
 })
 
-function impactLabel(i: RecipeUsage['impact']): string {
+function impactLabel(i: UsageRow['impact']): string {
   return i === 'high' ? 'Alto impacto' : i === 'mid' ? 'Impacto medio' : 'Bajo impacto'
 }
 
@@ -377,28 +385,52 @@ async function addToShopping(qty?: number): Promise<void> {
           </div>
         </div>
         <div class="pd-recipes">
-          <NuxtLink
-            v-for="u in usages"
-            :key="u.recipe.id"
-            class="pd-recipe"
-            :to="`/app/recetas/${u.recipe.id}`"
-            :aria-label="`${u.recipe.name}, ${u.qtyLabel}, ${impactLabel(u.impact)}`"
-          >
-            <div class="pd-recipe-ico" aria-hidden="true">{{ u.recipe.emoji ?? '🍽️' }}</div>
-            <div class="pd-recipe-body">
-              <div class="pd-recipe-name">{{ u.recipe.name }}</div>
-              <div class="pd-recipe-meta">{{ u.qtyLabel }}</div>
-              <span v-if="u.estimated" class="pd-est-tag">Margen estimado</span>
+          <!-- Loading: skeletons mientras llega el BOM del backend -->
+          <template v-if="usagesLoading && usages.length === 0">
+            <div v-for="i in 2" :key="i" class="pd-recipe pd-recipe-sk" aria-hidden="true">
+              <div class="pd-recipe-ico sk" />
+              <div class="pd-recipe-body">
+                <div class="sk sk-line" />
+                <div class="sk sk-line short" />
+              </div>
             </div>
-            <div class="pd-recipe-right">
-              <span class="pd-impact" :class="u.impact">{{ impactLabel(u.impact) }}</span>
-              <span class="pd-recipe-arrow" aria-hidden="true">
-                <UIcon name="i-lucide-chevron-right" />
-              </span>
-            </div>
-          </NuxtLink>
+          </template>
+
+          <!-- Error: el endpoint falló -->
           <UiEmptyState
-            v-if="usages.length === 0"
+            v-else-if="usagesError"
+            icon="i-lucide-alert-triangle"
+            title="No se pudieron cargar las recetas"
+            subtitle="Ocurrió un error al consultar dónde se usa este insumo. Intenta recargar la página."
+          />
+
+          <!-- Datos -->
+          <template v-else-if="usages.length > 0">
+            <NuxtLink
+              v-for="u in usages"
+              :key="u.recipeId"
+              class="pd-recipe"
+              :to="`/app/recetas/${u.recipeId}`"
+              :aria-label="`${u.name}, ${u.qtyLabel}, ${impactLabel(u.impact)}`"
+            >
+              <div class="pd-recipe-ico" aria-hidden="true">{{ u.emoji }}</div>
+              <div class="pd-recipe-body">
+                <div class="pd-recipe-name">{{ u.name }}</div>
+                <div class="pd-recipe-meta">{{ u.qtyLabel }}</div>
+                <span v-if="u.estimated" class="pd-est-tag">Margen estimado</span>
+              </div>
+              <div class="pd-recipe-right">
+                <span class="pd-impact" :class="u.impact">{{ impactLabel(u.impact) }}</span>
+                <span class="pd-recipe-arrow" aria-hidden="true">
+                  <UIcon name="i-lucide-chevron-right" />
+                </span>
+              </div>
+            </NuxtLink>
+          </template>
+
+          <!-- Empty -->
+          <UiEmptyState
+            v-else
             icon="i-lucide-utensils"
             title="Ninguna receta usa este insumo"
             subtitle="Cuando lo agregues a un plato, aparecerá aquí su impacto."
@@ -859,6 +891,14 @@ async function addToShopping(qty?: number): Promise<void> {
   transition: background var(--dur);
 }
 .pd-recipe:hover { background: var(--crema-50); }
+/* Skeletons de carga del panel "Usado en" */
+.pd-recipe-sk { pointer-events: none; }
+.pd-recipe .sk { background: var(--crema-200); border-radius: 6px; animation: pd-sk 1.4s ease infinite; }
+.pd-recipe-ico.sk { width: 44px; height: 44px; border-radius: 10px; }
+.pd-recipe-body .sk-line { height: 12px; width: 60%; margin-bottom: 6px; }
+.pd-recipe-body .sk-line.short { width: 38%; margin-bottom: 0; }
+@keyframes pd-sk { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .pd-recipe .sk { animation: none; } }
 .pd-recipe-ico {
   width: 44px; height: 44px; border-radius: 10px;
   background: var(--crema-100);

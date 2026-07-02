@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAdminDashboard, useManagerDashboard, useCashierDashboard } from '~/composables/use-reports'
+import { useAdminDashboard, useManagerDashboard, useCashierDashboard, useForecastInsights } from '~/composables/use-reports'
 
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Inicio — GastronomIA' })
@@ -31,7 +31,8 @@ definePageHeader(() => ({
 const isOwner = computed(() => user.value?.role === 'owner')
 const isManager = computed(() => user.value?.role === 'manager')
 const canManage = computed(() => isOwner.value || isManager.value)
-const num = (s: string | number | undefined | null): number => Number(s ?? 0)
+// Decimal strings from the backend (Prisma `Decimal`) — see app/utils/format.ts.
+const num = (s: string | number | undefined | null): number => toNumber(s)
 
 const admin = useAdminDashboard(() => isOwner.value)
 // Gate manager dashboard so it only fires for the manager role. The owner
@@ -41,6 +42,30 @@ const admin = useAdminDashboard(() => isOwner.value)
 const manager = useManagerDashboard(() => canManage.value && !isOwner.value)
 const cashier = useCashierDashboard(() => !canManage.value)
 const tables = useTables()
+
+// E08 / HU-08-07 (fase 3) · "Lo que se viene" — narrativa del forecast contextual.
+// Gateado a owner/manager: el backend devuelve 403 a staff, así que ni se dispara
+// la request para ese rol (mismo criterio que `manager`/`admin` arriba).
+const insights = useForecastInsights(() => canManage.value)
+const insightsLoading = computed(() => insights.isLoading.value && !insights.data.value)
+const insightsNeedsForecast = computed(() => insights.data.value?.needsForecast ?? false)
+const insightsDrivers = computed(() => insights.data.value?.upcomingDrivers ?? [])
+const insightsContextStatus = computed(() => insights.data.value?.contextStatus ?? null)
+// Único dato de credibilidad expuesto al owner/manager: mejora del modelo vs.
+// el baseline ingenuo, en lenguaje humano. La comparativa con/sin contexto
+// (`contextImprovementPct`) y el sMAPE crudo son internos del backtest y NO
+// se narran acá (ver `ForecastInsightsView` en shared/types/domain.ts).
+const improvementRounded = computed(() => {
+  const pct = insights.data.value?.improvementPct
+  return pct == null ? null : Math.round(pct)
+})
+const accuracyMessage = computed(() => {
+  const pct = improvementRounded.value
+  if (pct === null) return null
+  return pct > 0
+    ? `Proyección ${pct}% más precisa que el promedio histórico`
+    : 'Precisión en línea con el promedio histórico'
+})
 
 const primary = computed(() => (isOwner.value ? admin : canManage.value ? manager : cashier))
 const kpisLoading = computed(() => primary.value.isLoading.value && !primary.value.data.value)
@@ -58,9 +83,18 @@ const ordersToday = computed<number>(() => {
   return cashier.data.value?.salesCount ?? 0
 })
 
+// Ocupación: derivada del listado REAL de mesas (`useTables`), no de
+// `manager.data.openTables`. Bug real (QA-04): ese campo solo existe en
+// `ManagerDashboardView`, y `manager` se gatea con `enabled: canManage &&
+// !isOwner` (línea arriba) — para el rol owner esa query NUNCA se dispara, así
+// que `manager.data.value` queda `undefined` para siempre y el KPI mostraba
+// "0/10 · 0%" aunque el POS tuviera mesas ocupadas. `tables` ya se carga sin
+// gate de rol, así que contar por `status` es la fuente de verdad correcta
+// para owner Y manager, sin pedirle un campo extra al backend.
 const occupancy = computed(() => {
-  const active = manager.data.value?.openTables ?? 0
-  const total = tables.data.value?.length ?? 0
+  const rows = tables.data.value ?? []
+  const total = rows.length
+  const active = rows.filter(t => t.status !== 'free').length
   const pct = total > 0 ? Math.round((active / total) * 100) : 0
   return { active, total, pct }
 })
@@ -145,7 +179,7 @@ const shortcuts = computed(() => [
             <p class="eyebrow">{{ revenueLabel }}</p>
             <span class="kpi-ico is-coral" aria-hidden="true"><UIcon name="i-lucide-wallet" /></span>
           </div>
-          <p class="stat kpi-num"><span class="cur">S/</span>{{ revenueToday.toLocaleString('es-PE') }}</p>
+          <p class="stat kpi-num"><span class="cur">S/</span>{{ revenueToday.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</p>
           <div v-if="hasSalesSeries" class="kpi-viz">
             <ChartsSparkline :values="salesSeries.map(p => p.value)" color="var(--terracotta)" :height="30" />
           </div>
@@ -211,11 +245,53 @@ const shortcuts = computed(() => [
       <div class="panel-head">
         <div class="trend-title">
           <span class="section-title">Ventas · últimos 7 días</span>
-          <p class="trend-total stat"><span class="cur">S/</span>{{ revenue7d.toLocaleString('es-PE') }}</p>
+          <p class="trend-total stat"><span class="cur">S/</span>{{ revenue7d.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</p>
         </div>
         <NuxtLink to="/app/reportes" class="link">Ver reportes</NuxtLink>
       </div>
       <ChartsAreaChart :data="salesSeries" unit="S/" />
+    </section>
+
+    <!-- "Lo que se viene" (E08 / HU-08-07 fase 3): narrativa de drivers del forecast -->
+    <section v-if="canManage" class="panel forecast-panel" aria-label="Lo que se viene">
+      <div class="panel-head">
+        <span class="section-title">Lo que se viene</span>
+        <NuxtLink to="/app/inventario/lista-compras" class="link">Ver lista de compras</NuxtLink>
+      </div>
+
+      <div v-if="insightsLoading" class="state" aria-busy="true">
+        <span class="sk sk-l" /><span class="sk sk-f" />
+      </div>
+
+      <div v-else-if="insights.error.value" class="state">
+        <p>No se pudo cargar el pronóstico.</p>
+        <button class="btn btn-ghost" @click="insights.refresh()"><UIcon name="i-lucide-rotate-cw" /> Reintentar</button>
+      </div>
+
+      <UiEmptyState
+        v-else-if="insightsNeedsForecast"
+        icon="i-lucide-bar-chart-2"
+        title="Forecast no disponible"
+        subtitle="Aún no hay un análisis de demanda completado para narrar los próximos días."
+      >
+        <NuxtLink to="/app/inventario/lista-compras" class="btn btn-ghost">Ir a lista de compras</NuxtLink>
+      </UiEmptyState>
+
+      <div v-else class="forecast-body">
+        <ForecastDriverChips :drivers="insightsDrivers" :max-chips="3" />
+        <p v-if="insightsDrivers.length === 0" class="forecast-empty">
+          Sin factores destacados en el horizonte actual.
+        </p>
+        <p v-if="insightsContextStatus === 'calendar_only'" class="forecast-note">
+          <UIcon name="i-lucide-cloud-off" aria-hidden="true" /> Pronóstico sin datos de clima
+        </p>
+        <p v-if="accuracyMessage" class="forecast-accuracy">
+          <span v-if="improvementRounded && improvementRounded > 0" class="delta is-up">
+            <UIcon name="i-lucide-trending-up" class="delta-ico" />+{{ improvementRounded }}%
+          </span>
+          <span>{{ accuracyMessage }}</span>
+        </p>
+      </div>
     </section>
 
     <!-- Cuerpo: top platos + accesos -->
@@ -443,6 +519,24 @@ const shortcuts = computed(() => [
 .trend-title { display: flex; flex-direction: column; gap: 6px; }
 .trend-total { font-size: clamp(22px, 2.6vw, 30px); color: var(--fg1); line-height: 1; }
 .trend-total .cur { font-size: 0.5em; font-weight: 600; color: var(--fg3); vertical-align: 0.4em; margin-right: 2px; }
+
+/* "Lo que se viene" — reutiliza .panel/.panel-head/.section-title/.link ya
+   definidos arriba y .delta.is-up (mismo lenguaje visual que los KPIs). */
+.forecast-body { display: flex; flex-direction: column; gap: 10px; }
+.forecast-empty { font-size: 13px; color: var(--fg2); margin: 0; }
+.forecast-note {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg2);
+  margin: 0;
+}
+.forecast-note .iconify { width: 13px; height: 13px; flex-shrink: 0; }
+.forecast-accuracy {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--fg2);
+  margin: 2px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
 
 /* Cuerpo: dos columnas en desktop */
 .body {

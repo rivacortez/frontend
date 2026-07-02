@@ -242,6 +242,14 @@ export function useForecastShoppingSuggestions() {
      * Distinguish this from an empty suggestions list (stock fully covered).
      */
     needsForecast: computed(() => query.data.value?.needsForecast ?? false),
+    /** Exogenous drivers (holiday/gastro_event/weather/weekend/…) within the forecast window. */
+    drivers: computed(() => query.data.value?.drivers ?? []),
+    /**
+     * Context status of the run backing `suggestions` (HU-08-07 fase 2).
+     * `calendar_only` → weather was unreachable when the run generated the
+     * data; the UI shows a discreet note instead of treating it as an error.
+     */
+    contextStatus: computed(() => query.data.value?.contextStatus ?? null),
   };
 }
 

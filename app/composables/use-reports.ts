@@ -1,4 +1,5 @@
 import type { ApiResponse } from "#shared/types/api";
+import type { ForecastInsightsView } from "#shared/types/domain";
 import type { CashierDashboardView } from "~~/server/api/reports/dashboard/cashier.get";
 import type { ManagerDashboardView } from "~~/server/api/reports/dashboard/manager.get";
 import type { AdminDashboardView } from "~~/server/api/reports/dashboard/admin.get";
@@ -149,6 +150,24 @@ export function useAdminDashboard(enabled?: MaybeRefOrGetter<boolean>) {
     query: () =>
       $fetch<ApiResponse<AdminDashboardView>>(
         "/api/reports/dashboard/admin",
+      ).then((r) => r.data),
+  });
+}
+
+/**
+ * E08 / HU-08-07 (fase 3) · Resumen narrado del forecast para el panel "Lo
+ * que se viene" del dashboard. owner/manager only — el backend devuelve 403 a
+ * staff, así que el caller SIEMPRE debe pasar un `enabled` gateado por rol
+ * (mismo patrón que `useManagerDashboard`/`useAdminDashboard`) para no
+ * disparar una request que sabemos que va a fallar.
+ */
+export function useForecastInsights(enabled?: MaybeRefOrGetter<boolean>) {
+  return useQuery({
+    key: () => ["forecasting", "insights"] as const,
+    enabled: enabledGetter(enabled),
+    query: () =>
+      $fetch<ApiResponse<ForecastInsightsView>>(
+        "/api/forecasting/insights",
       ).then((r) => r.data),
   });
 }

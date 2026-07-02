@@ -199,6 +199,20 @@ const pad = (n: number | undefined): string => String(n ?? '').padStart(2, '0')
     />
 
     <template v-if="order">
+      <!-- Descuento del pedido: se reparte proporcional entre las partes. -->
+      <div v-if="order.discount" class="sb-discount" role="note">
+        <UIcon name="i-lucide-badge-percent" />
+        <div class="sb-discount-body">
+          <span class="sb-discount-line">
+            Bruto {{ formatPEN(totals.gross) }} · descuento
+            <b>− {{ formatPEN(totals.discount) }}</b>
+            <span v-if="order.discount.type === 'pct'"> ({{ order.discount.value }}%)</span>
+            <span v-if="order.discount.reason" class="sb-discount-reason"> · {{ order.discount.reason }}</span>
+          </span>
+          <span class="sb-discount-total">Total con descuento: <b>{{ formatPEN(totals.total) }}</b></span>
+        </div>
+      </div>
+
       <!-- Toggle modo -->
       <div class="sb-toggle" role="tablist">
         <button role="tab" :aria-selected="mode === 'persona'" :class="{ on: mode === 'persona' }" @click="mode = 'persona'">
@@ -373,6 +387,22 @@ const pad = (n: number | undefined): string => String(n ?? '').padStart(2, '0')
   margin: 0 auto;
   padding-bottom: 24px;
 }
+
+.sb-discount {
+  margin: 0 20px 14px;
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--crema-100);
+  border: 1px solid var(--terracotta-100);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.sb-discount > .iconify { width: 18px; height: 18px; color: var(--terracotta-700); flex-shrink: 0; margin-top: 1px; }
+.sb-discount-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sb-discount-line { font-size: 12.5px; color: var(--fg2); line-height: 1.4; }
+.sb-discount-line b { color: var(--terracotta-700); font-variant-numeric: tabular-nums; }
+.sb-discount-reason { color: var(--fg3); }
+.sb-discount-total { font-size: 13px; color: var(--fg1); }
+.sb-discount-total b { font-variant-numeric: tabular-nums; }
 
 .sb-toggle {
   margin: 0 20px 16px;

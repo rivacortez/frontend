@@ -18,6 +18,10 @@ const patchTable = usePatchTable()
 const patchOrder = usePatchOrder()
 
 const tableLabel = computed(() => String(props.table.number).padStart(2, '0'))
+// `props.order` es la orden persistida en el backend — solo cuenta lo YA
+// enviado a cocina. Los ítems "por enviar" (carrito local de la pantalla de
+// mesa) no llegan a este sheet, así que el subtítulo lo aclara explícitamente
+// en vez de mostrar "0 items · S/0.00" sin contexto (QA-05).
 const itemCount = computed(() => props.order?.items.reduce((s, it) => s + it.qty, 0) ?? 0)
 const total = computed(() => orderTotals(props.order).total)
 
@@ -70,7 +74,14 @@ async function handleAction(action: MesaAction, close: () => void): Promise<void
         if (props.order) {
           const { data: preBill } = await $fetch<ApiResponse<PreBill>>(`/api/orders/${props.order.id}/pre-bill`)
           await patchTable.mutateAsync({ id: props.table.id, status: 'bill' })
-          toast.add({ title: `Pre-cuenta · ${formatPEN(Number(preBill.total))}`, description: 'Enviada a impresora (IGV incluido).', icon: 'i-lucide-printer' })
+          // Si el pedido lleva descuento, la pre-cuenta lo detalla (bruto → descuento
+          // con motivo → total), para que quede claro qué se está por cobrar.
+          const description = preBill.discount
+            ? `Bruto ${formatPEN(Number(preBill.grossTotal))} · descuento − ${formatPEN(Number(preBill.discount.amount))}`
+              + (preBill.discount.reason ? ` (${preBill.discount.reason})` : '')
+              + '. IGV incluido, enviada a impresora.'
+            : 'Enviada a impresora (IGV incluido).'
+          toast.add({ title: `Pre-cuenta · ${formatPEN(Number(preBill.total))}`, description, icon: 'i-lucide-printer' })
         }
         else {
           await patchTable.mutateAsync({ id: props.table.id, status: 'bill' })
@@ -127,7 +138,7 @@ async function closeWithoutCharge(): Promise<void> {
   <UiBottomSheet
     v-model="open"
     :title="`Mesa ${tableLabel}`"
-    :subtitle="`${itemCount} items · ${formatPEN(total)}`"
+    :subtitle="`${itemCount} enviados a cocina · ${formatPEN(total)}`"
   >
     <template #default="{ close }">
       <nav class="mas-list" aria-label="Acciones secundarias de la mesa">

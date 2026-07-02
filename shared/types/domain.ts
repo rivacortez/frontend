@@ -99,6 +99,27 @@ export interface OrderDiscount {
   reason?: string;
 }
 
+/**
+ * Descuento tal como aparece en las vistas CALCULADAS (pre-cuenta, división y
+ * comprobante): además del `type`/`value`/`reason` capturados, incluye el
+ * `amount` en soles que el backend efectivamente restó del bruto ANTES de
+ * partir el IGV. Convención de moneda: string en las vistas de moneda-string
+ * (PreBill/SplitResult) y number en `Sale` (que ya convierte a number).
+ */
+export interface PreBillDiscount {
+  type: DiscountType;
+  value: string;
+  reason?: string;
+  amount: string;
+}
+
+export interface SaleDiscount {
+  type: DiscountType;
+  value: number;
+  reason?: string;
+  amount: number;
+}
+
 export type PaymentMethod = "cash" | "card" | "yape" | "plin";
 
 export interface OrderPayment {
@@ -140,6 +161,10 @@ export interface Sale {
   customer?: string;
   customerDoc?: string;
   items: SaleItem[];
+  // `grossTotal`/`discount` solo vienen cuando la venta llevó descuento (E04);
+  // `subtotal`/`igv`/`total` ya reflejan el descuento restado.
+  grossTotal?: number;
+  discount?: SaleDiscount | null;
   subtotal: number;
   igv: number;
   total: number;
@@ -160,6 +185,10 @@ export interface PreBill {
   orderId: string;
   tableCode: string;
   items: PreBillLine[];
+  // Bruto (antes de descuento) + descuento aplicado. `subtotal`/`igv`/`total`
+  // ya vienen con el descuento restado ANTES de partir el IGV.
+  grossTotal: string;
+  discount: PreBillDiscount | null;
   subtotal: string;
   igv: string;
   total: string;
@@ -176,6 +205,10 @@ export interface SplitShare {
 export interface SplitResult {
   orderId: string;
   mode: "equal" | "items";
+  // Bruto + descuento del pedido; el backend reparte el total YA con descuento
+  // de forma proporcional entre las partes (`shares`).
+  grossTotal: string;
+  discount: PreBillDiscount | null;
   shares: SplitShare[];
   total: string;
 }
@@ -220,12 +253,75 @@ export interface ForecastShoppingItem extends ShoppingItem {
   shortfall: number;
 }
 
+/**
+ * Known exogenous driver kinds surfaced by the demand forecast (E08 / HU-08-07).
+ * Kept as a union for icon/label mapping, but `ForecastDriver.kind` is widened
+ * to accept unrecognized strings too (see note there) — core-ai is adding
+ * `"payday"` in parallel and may introduce further kinds later; the UI must
+ * degrade to a generic badge instead of breaking.
+ */
+export type KnownForecastDriverKind =
+  "holiday" | "gastro_event" | "weather" | "weekend" | "payday";
+
+/**
+ * Context status of the forecast run backing a response.
+ * `full` = calendar + weather resolved · `calendar_only` = Open-Meteo was
+ * unreachable, calendar-based drivers (holiday/gastro_event/weekend/payday)
+ * still apply · `off` = context was not requested (never happens for the
+ * business runs the UI reads from).
+ */
+export type ForecastContextStatus = "full" | "calendar_only" | "off";
+
+/**
+ * A single narratable exogenous factor within the forecast window (e.g. "Día
+ * del Ceviche" or "Fin de semana"). `impactPct` is the historical average
+ * uplift/drop for that kind of day vs. an equivalent day without it; `null`
+ * when the backend has no prior occurrence to compare against — the UI must
+ * show the event without inventing a number.
+ *
+ * `kind` is intentionally widened past {@link KnownForecastDriverKind} (`string &
+ * {}` keeps autocomplete for known values while still accepting anything the
+ * backend sends) so a still-unknown kind renders as a generic badge instead of
+ * a type error or a runtime crash.
+ */
+export interface ForecastDriver {
+  date: string;
+  kind: KnownForecastDriverKind | (string & {});
+  label: string;
+  impactPct: number | null;
+}
+
 /** BFF view returned to the composable layer for Widget A (forecast shopping list). */
 export interface ForecastShoppingSuggestionsView {
   horizon: number;
   /** When true the forecast service has no completed run — show an empty state. */
   needsForecast: boolean;
   suggestions: ForecastShoppingItem[];
+  /** Exogenous drivers within the forecast window; `[]` when `needsForecast`. */
+  drivers: ForecastDriver[];
+  /** Context status of the run backing `suggestions`; `null` when `needsForecast`. */
+  contextStatus: ForecastContextStatus | null;
+}
+
+/**
+ * Narrated summary for the dashboard "Lo que se viene" panel (owner/manager,
+ * E08 / HU-08-07 fase 3). Deliberately does NOT expose raw sMAPE or the
+ * context-vs-no-context academic comparison (`contextImprovementPct`) — those
+ * are backtest internals, not meaningful (and sometimes negative on demo
+ * data) to a restaurant owner. `improvementPct` is the one credibility signal
+ * worth narrating: how much better the model is than the naive baseline.
+ */
+export interface ForecastInsightsView {
+  /** True when the tenant has no completed forecast run yet. */
+  needsForecast: boolean;
+  contextStatus: ForecastContextStatus | null;
+  horizon: number | null;
+  /** ISO timestamp of the run used; `null` when `needsForecast`. */
+  generatedAt: string | null;
+  /** Drivers with `date >= today (Lima)`, already bounded by the backend. */
+  upcomingDrivers: ForecastDriver[];
+  /** Model accuracy vs. the naive baseline, in percent; `null` when unavailable. */
+  improvementPct: number | null;
 }
 
 /**

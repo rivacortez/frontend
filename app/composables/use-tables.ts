@@ -115,7 +115,6 @@ export function usePatchOrder() {
       ...payload
     }: {
       orderId: string;
-      discount?: OrderDiscount | null;
       itemUpdates?: OrderItemUpdate[];
       status?: "open" | "void";
       // HU-03-11: razón al anular (status:'void'). El BFF la mapea a /void {reason}.
@@ -124,6 +123,43 @@ export function usePatchOrder() {
       $fetch<ApiResponse<Order>>(`/api/orders/${orderId}`, {
         method: "PATCH",
         body: payload,
+      }).then((r) => r.data),
+    onSettled: invalidate,
+  });
+}
+
+/**
+ * E04 · HU-04 · Aplica un descuento a la orden (POST /orders/:id/discount).
+ * Solo manager/owner (el backend 403ea a staff); 400 si un descuento por monto
+ * excede el bruto. Invalida mesas/órdenes para que el total se refresque.
+ */
+export function useApplyDiscount() {
+  const invalidate = useInvalidateTables();
+  return useMutation({
+    mutation: ({
+      orderId,
+      ...body
+    }: {
+      orderId: string;
+      type: OrderDiscount["type"];
+      value: number;
+      reason: string;
+    }) =>
+      $fetch<ApiResponse<Order>>(`/api/orders/${orderId}/discount`, {
+        method: "POST",
+        body,
+      }).then((r) => r.data),
+    onSettled: invalidate,
+  });
+}
+
+/** E04 · HU-04 · Quita el descuento de la orden (DELETE /orders/:id/discount). */
+export function useRemoveDiscount() {
+  const invalidate = useInvalidateTables();
+  return useMutation({
+    mutation: (orderId: string) =>
+      $fetch<ApiResponse<Order>>(`/api/orders/${orderId}/discount`, {
+        method: "DELETE",
       }).then((r) => r.data),
     onSettled: invalidate,
   });
