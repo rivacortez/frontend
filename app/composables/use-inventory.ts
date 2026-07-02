@@ -269,9 +269,15 @@ export function useForecastShoppingSuggestions(
 
 /**
  * Real stock coverage in days for the given ingredient, derived from the
- * backend's 30-day average consumption. Use this instead of the local heuristic
+ * backend's 30-day average consumption, extended with shelf-life/freshness
+ * data (B4 — F3 "Vida útil" widget). Use this instead of the local heuristic
  * `status → hardcoded days`. When `data.daysLeft` is null, show
  * "sin consumo reciente para estimar" — do NOT default to a placeholder number.
+ * `data.effectiveCoverageDays` (`min(daysLeft, daysUntilExpiry)`) is the
+ * headline figure to present — whichever constraint (running out vs.
+ * spoiling) is tighter. `data.freshnessStatus === null` means there is no
+ * purchase to anchor a freshness estimate on; the "Vida útil" widget should
+ * degrade to a discreet "sin datos" state rather than disappearing abruptly.
  */
 export function useIngredientCoverage(ingredientId: MaybeRefOrGetter<string>) {
   return useQuery({

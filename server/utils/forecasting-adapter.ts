@@ -31,6 +31,10 @@ interface BeForecastSuggestion {
   forecastConsumption: string;
   shortfall: string;
   suggestedQty: string;
+  /** True when `suggestedQty` was reduced below the demand gap to avoid spoilage (B4). */
+  cappedByShelfLife: boolean;
+  /** Pre-cap `suggestedQty` (shortfall-based); null when not capped. */
+  uncappedSuggestedQty: string | null;
 }
 
 /**
@@ -182,6 +186,11 @@ export async function forecastShoppingSuggestions(
       reason: `Déficit de forecast: ${shortfall} ${s.unit}`,
       urgent: shortfall > 0,
       checked: false,
+      cappedByShelfLife: s.cappedByShelfLife,
+      uncappedSuggestedQty:
+        s.uncappedSuggestedQty != null
+          ? +num(s.uncappedSuggestedQty).toFixed(2)
+          : null,
     };
   });
 

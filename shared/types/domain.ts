@@ -262,6 +262,20 @@ export interface ForecastShoppingItem extends ShoppingItem {
    * "cost of the recommended purchase", regardless of future lot sizing.
    */
   shortfallCost: number;
+  /**
+   * True when the backend reduced `suggestedQty` below what the demand gap
+   * (`shortfall`) alone would call for, because buying more would spoil before
+   * it can be consumed (shelf-life-aware purchasing, B4). When true, prefer
+   * showing `uncappedSuggestedQty` alongside `suggestedQty` so the reduction
+   * is legible rather than looking like a rounding artifact.
+   */
+  cappedByShelfLife: boolean;
+  /**
+   * The quantity that would have been suggested WITHOUT the shelf-life cap
+   * (i.e. `shortfall`-based, pre-adjustment). Null when `cappedByShelfLife` is
+   * false — there is nothing to contrast `suggestedQty` against.
+   */
+  uncappedSuggestedQty: number | null;
 }
 
 /**
@@ -380,8 +394,24 @@ export interface ForecastAccuracyView {
 }
 
 /**
- * Real stock coverage in days, computed by the backend from 30-day avg consumption.
- * `daysLeft: null` when `avgDailyConsumption === 0` (no recent movements).
+ * Freshness state of an ingredient, computed server-side from its shelf life
+ * and last purchase date. `null` (on {@link IngredientCoverageView}) means the
+ * backend has nothing to base a freshness estimate on — either the ingredient
+ * has no purchase history yet, or it isn't tracked for perishability.
+ */
+export type FreshnessStatus = "fresh" | "expiring_soon" | "expired";
+
+/**
+ * Real stock coverage in days, computed by the backend from 30-day avg
+ * consumption, extended with shelf-life/freshness data (B4). `daysLeft: null`
+ * when `avgDailyConsumption === 0` (no recent movements).
+ *
+ * The freshness fields (`shelfLifeDays` through `atRiskCost`) are ALL derived
+ * server-side from the ingredient's last purchase — the frontend never
+ * recomputes expiry math (no FEFO, no lot tracking) here, it only presents
+ * these values. `lastPurchaseAt`/`estimatedExpiryAt`/`freshnessStatus`/
+ * `atRiskQty`/`atRiskCost` are `null` together when there is no purchase to
+ * anchor a freshness estimate on.
  */
 export interface IngredientCoverageView {
   ingredientId: string;
@@ -391,6 +421,29 @@ export interface IngredientCoverageView {
   basedOnDays: number;
   /** null → no recent consumption; estimate is not possible. */
   daysLeft: number | null;
+  /** Shelf life configured for this ingredient, in days. */
+  shelfLifeDays: number;
+  /** ISO date of the last registered purchase, or null if none exists. */
+  lastPurchaseAt: string | null;
+  /** `lastPurchaseAt + shelfLifeDays`, or null when `lastPurchaseAt` is null. */
+  estimatedExpiryAt: string | null;
+  /** Server-computed freshness state; null when no purchase anchors the estimate. */
+  freshnessStatus: FreshnessStatus | null;
+  /**
+   * The real stock coverage in days: `min(daysLeft, daysUntilExpiry)`. This is
+   * the figure the UI should present as the headline number — whichever
+   * constraint (running out vs. spoiling) is tighter is what actually limits
+   * usable stock. Null only when both `daysLeft` and the expiry estimate are
+   * unknown.
+   */
+  effectiveCoverageDays: number | null;
+  /**
+   * Quantity projected to spoil before it can be consumed, given the demand
+   * pace — null when there is no freshness tracking for this ingredient.
+   */
+  atRiskQty: number | null;
+  /** PEN value of `atRiskQty`; null under the same conditions. */
+  atRiskCost: number | null;
 }
 
 /** Single price-history data point from a purchase order or manual adjustment. */

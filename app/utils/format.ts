@@ -55,6 +55,18 @@ export function formatShortDate(isoDate: string): string {
   });
 }
 
+/**
+ * Días restantes (redondeados hacia arriba) hasta una fecha ISO; negativo si
+ * ya pasó. Uso exclusivamente de PRESENTACIÓN (p. ej. "Por vencer · N días" en
+ * el widget de vida útil, F3) — el backend es la única fuente de verdad para
+ * el estado de frescura (`freshnessStatus`); este helper solo formatea una
+ * fecha que el backend ya calculó (`estimatedExpiryAt`), nunca decide el
+ * estado por su cuenta.
+ */
+export function daysUntil(isoDate: string, now: number = Date.now()): number {
+  return Math.ceil((new Date(isoDate).getTime() - now) / 86_400_000);
+}
+
 /** Tiempo relativo: "hace 4 min", "hace 2 h", "ayer" */
 export function timeAgo(isoDate: string): string {
   const diffMs = Date.now() - new Date(isoDate).getTime();

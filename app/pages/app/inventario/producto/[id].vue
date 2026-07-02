@@ -149,6 +149,42 @@ const daysLeft = computed<number | null>(() => coverage.value?.daysLeft ?? null)
 const avgDailyConsumption = computed(() => coverage.value?.avgDailyConsumption ?? null)
 const basedOnDays = computed(() => coverage.value?.basedOnDays ?? 30)
 
+/* ===== Vida útil (F3, B4) ===== */
+// Todos estos valores vienen calculados por el backend (`/coverage` extendido);
+// el frontend solo los presenta, nunca recalcula caducidad/FEFO.
+const freshnessStatus = computed(() => coverage.value?.freshnessStatus ?? null)
+const hasFreshnessData = computed(() => freshnessStatus.value !== null)
+const lastPurchaseAt = computed(() => coverage.value?.lastPurchaseAt ?? null)
+const estimatedExpiryAt = computed(() => coverage.value?.estimatedExpiryAt ?? null)
+const atRiskQty = computed(() => coverage.value?.atRiskQty ?? null)
+const atRiskCost = computed(() => coverage.value?.atRiskCost ?? null)
+const effectiveCoverageDays = computed<number | null>(() => coverage.value?.effectiveCoverageDays ?? null)
+
+const freshnessLabel = computed(() => {
+  const status = freshnessStatus.value
+  if (status === 'expired') return 'Vencido'
+  if (status === 'expiring_soon') {
+    const days = estimatedExpiryAt.value ? daysUntil(estimatedExpiryAt.value) : null
+    return days !== null ? `Por vencer · ${Math.max(0, days)} día${Math.max(0, days) === 1 ? '' : 's'}` : 'Por vencer'
+  }
+  if (status === 'fresh') return 'Fresco'
+  return 'Sin vida útil configurada'
+})
+
+// Restricción que manda en la cobertura efectiva: si no hay seguimiento de vida
+// útil, el consumo es la única restricción posible; si no hay consumo reciente,
+// la vida útil es la única; si ambas existen, la más ajustada (menor) manda —
+// misma semántica que `effectiveCoverageDays = min(daysLeft, daysUntilExpiry)`
+// del backend, solo que aquí se etiqueta cuál de las dos ganó.
+const coverageConstraint = computed<'consumo' | 'vida-util' | null>(() => {
+  if (effectiveCoverageDays.value === null) return null
+  if (!hasFreshnessData.value) return 'consumo'
+  if (daysLeft.value === null) return 'vida-util'
+  return effectiveCoverageDays.value < daysLeft.value ? 'vida-util' : 'consumo'
+})
+const coverageConstraintLabel = computed(() =>
+  coverageConstraint.value === 'vida-util' ? 'Limitado por vida útil' : 'Limitado por consumo')
+
 /* ===== Tendencia de precio (Widget C) ===== */
 // Points arrive newest-first from the backend. Reverse for chronological display.
 // Fewer than 2 points → no % change is computable.
@@ -494,13 +530,16 @@ async function addToShopping(qty?: number): Promise<void> {
           <div class="pd-proj-body">
             <div class="pd-proj-title">
               Cobertura de stock
-              <span class="tag">CONSUMO</span>
+              <span v-if="coverageConstraint" class="tag">
+                {{ coverageConstraint === 'vida-util' ? 'VIDA ÚTIL' : 'CONSUMO' }}
+              </span>
             </div>
             <template v-if="coverage">
               <p class="pd-proj-text">
-                <template v-if="daysLeft !== null">
+                <template v-if="effectiveCoverageDays !== null">
                   Stock disponible por aproximadamente
-                  <span class="days">{{ Math.floor(daysLeft) }} días</span>.
+                  <span class="days">{{ Math.floor(effectiveCoverageDays) }} días</span>.
+                  <b>{{ coverageConstraintLabel }}</b>.
                   Consumo promedio: <b>{{ avgDailyConsumption }} {{ product.unit }}/día</b>.
                 </template>
                 <template v-else>
@@ -517,6 +556,38 @@ async function addToShopping(qty?: number): Promise<void> {
           <button class="btn btn-primary" @click="addToShopping(suggestQty)">
             <UIcon name="i-lucide-shopping-cart" /> Agregar {{ suggestQty }} {{ product.unit }} a lista
           </button>
+        </div>
+      </section>
+
+      <!-- ============ Vida útil (F3, B4) ============ -->
+      <!-- Server-computed freshness/shelf-life estimate. Hidden content when the
+           ingredient has no purchase to anchor an estimate on — shows a discreet
+           "sin datos" state instead of disappearing (could be non-perishable or
+           simply never purchased; the payload doesn't distinguish the two). -->
+      <section class="pd-shelf" aria-label="Vida útil">
+        <div class="pd-shelf-head">
+          <div class="pd-shelf-ico" :class="freshnessStatus" aria-hidden="true">
+            <UIcon name="i-lucide-leaf" />
+          </div>
+          <div class="pd-shelf-body">
+            <div class="pd-shelf-title">Vida útil</div>
+            <template v-if="coverage && hasFreshnessData">
+              <div class="pd-fresh-chip" :class="freshnessStatus">
+                <span class="d" aria-hidden="true" />
+                {{ freshnessLabel }}
+              </div>
+              <p class="pd-shelf-text">
+                Ingresado el {{ lastPurchaseAt && formatShortDate(lastPurchaseAt) }} ·
+                vence ~{{ estimatedExpiryAt && formatShortDate(estimatedExpiryAt) }}
+              </p>
+              <p v-if="atRiskQty !== null && atRiskQty > 0" class="pd-shelf-risk">
+                <b>{{ atRiskQty }} {{ product.unit }} en riesgo ({{ formatPEN(atRiskCost ?? 0) }})</b>
+                si no se consume antes del vencimiento.
+              </p>
+            </template>
+            <p v-else-if="coverage" class="pd-shelf-empty">Sin vida útil configurada.</p>
+            <p v-else class="pd-shelf-empty">Calculando vida útil…</p>
+          </div>
         </div>
       </section>
 
@@ -1066,6 +1137,66 @@ async function addToShopping(qty?: number): Promise<void> {
 .pd-proj-actions {
   display: flex; gap: 8px;
   margin-top: 12px;
+}
+
+/* ============ VIDA ÚTIL (F3, B4) ============ */
+/* Tarjeta blanca con borde (no gradiente): la única superficie tintada de esta
+   pantalla ya la usa el widget de Cobertura (.pd-proj) — este widget reutiliza
+   su lenguaje de layout (ícono + cuerpo) pero en superficie neutra. */
+.pd-shelf {
+  margin: 14px 16px 0;
+  background: var(--pure-white);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 14px;
+}
+.pd-shelf-head {
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.pd-shelf-ico {
+  width: 38px; height: 38px; border-radius: 11px;
+  background: var(--crema-200);
+  color: var(--fg3);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.pd-shelf-ico > .iconify { width: 19px; height: 19px; }
+.pd-shelf-ico.fresh { background: var(--success-bg); color: var(--oliva-700); }
+.pd-shelf-ico.expiring_soon { background: var(--warning-bg); color: var(--mostaza-700); }
+.pd-shelf-ico.expired { background: var(--danger-bg); color: var(--danger); }
+.pd-shelf-body { flex: 1; min-width: 0; }
+.pd-shelf-title {
+  font-size: 13.5px; font-weight: 600; color: var(--fg1);
+  margin-bottom: 6px;
+}
+/* Mismo patrón dot+label que .pd-status-pill (hero): status = punto + texto, sin ícono-chip tintado. */
+.pd-fresh-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+.pd-fresh-chip .d { width: 7px; height: 7px; border-radius: 50%; }
+.pd-fresh-chip.fresh { background: var(--success-bg); color: var(--oliva-700); }
+.pd-fresh-chip.fresh .d { background: var(--oliva); }
+.pd-fresh-chip.expiring_soon { background: var(--warning-bg); color: var(--mostaza-700); }
+.pd-fresh-chip.expiring_soon .d { background: var(--mostaza); }
+.pd-fresh-chip.expired { background: var(--danger-bg); color: var(--danger); }
+.pd-fresh-chip.expired .d { background: var(--danger); }
+.pd-shelf-text {
+  margin: 0;
+  font-size: 12.5px; line-height: 1.5; color: var(--fg2);
+}
+.pd-shelf-risk {
+  margin: 8px 0 0;
+  font-size: 12.5px; line-height: 1.5; color: var(--fg2);
+}
+.pd-shelf-risk b { color: var(--danger); font-weight: 600; }
+.pd-shelf-empty {
+  margin: 0;
+  font-size: 12.5px; color: var(--fg3); font-style: italic;
 }
 
 /* ============ TENDENCIA DE PRECIO (Widget C) ============ */

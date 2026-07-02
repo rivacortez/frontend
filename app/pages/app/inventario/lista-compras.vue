@@ -222,13 +222,23 @@ function share(): void {
               {{ item.name }}
               <span v-if="item.urgent" class="sl-urgent">Urgente</span>
             </span>
-            <span class="sl-item-qty">{{ item.suggestedQty }} {{ item.unit }}</span>
+            <span class="sl-item-qty">
+              {{ item.suggestedQty }} {{ item.unit }}
+              <span v-if="item.cappedByShelfLife" class="sl-cap-note">· ajustado por vida útil</span>
+            </span>
           </div>
           <div class="sl-item-price">{{ formatPEN(item.estimatedCost) }}</div>
           <div v-if="expanded === item.id" class="sl-item-detail" @click.stop>
             <div class="row"><span>Stock actual</span><span class="v">{{ item.currentStock }} {{ item.unit }}</span></div>
             <div class="row"><span>Déficit forecast</span><span class="v">{{ item.shortfall }} {{ item.unit }}</span></div>
             <div class="row"><span>Cantidad sugerida</span><span class="v">{{ item.suggestedQty }} {{ item.unit }}</span></div>
+            <!-- B4: la cantidad se topó para no comprar más de lo que se puede
+                 consumir antes de que se malogre — la cifra sin topar queda a la
+                 vista para que la reducción no se lea como un error de cálculo. -->
+            <div v-if="item.cappedByShelfLife" class="row">
+              <span>Sin ajuste por vida útil</span>
+              <span class="v">{{ item.uncappedSuggestedQty }} {{ item.unit }}</span>
+            </div>
             <div class="row"><span>Costo estimado</span><span class="v">{{ formatPEN(item.estimatedCost) }}</span></div>
             <NuxtLink :to="`/app/inventario/producto/${item.ingredientId}`" class="sl-detail-link">
               Ver insumo <UIcon name="i-lucide-arrow-right" />
@@ -439,6 +449,7 @@ function share(): void {
   padding: 2px 6px; border-radius: 999px;
 }
 .sl-item-qty { font-size: 12px; color: var(--fg3); }
+.sl-cap-note { font-style: italic; }
 .sl-item-price {
   font-size: 13.5px; font-weight: 600; color: var(--fg1);
   font-variant-numeric: tabular-nums;
