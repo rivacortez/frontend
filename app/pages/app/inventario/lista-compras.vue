@@ -241,7 +241,7 @@ function share(): void {
         v-else-if="needsForecast"
         icon="i-lucide-bar-chart-2"
         title="Forecast no disponible"
-        subtitle="Aún no hay un análisis de demanda completado. Ejecutá el forecast para obtener sugerencias de compra."
+        subtitle="Aún no hay un análisis de demanda completado. Ejecuta el forecast para obtener sugerencias de compra."
       />
       <UiEmptyState
         v-else

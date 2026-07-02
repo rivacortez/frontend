@@ -163,7 +163,7 @@ async function onSubmit(event: FormSubmitEvent<LoginInput>): Promise<void> {
         <div class="demo">
           <div class="demo-hdr">
             <span class="demo-eyebrow">Demo · Motif Restobar</span>
-            <span class="demo-hint">Probá por rol con un click</span>
+            <span class="demo-hint">Prueba por rol con un click</span>
           </div>
           <div class="demo-chips">
             <button

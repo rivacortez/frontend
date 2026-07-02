@@ -85,7 +85,7 @@ export function useChatQuery() {
           id: crypto.randomUUID(),
           role: "assistant",
           content:
-            "No pude generar una consulta segura para esa pregunta. Intentá reformularla con más detalle.",
+            "No pude generar una consulta segura para esa pregunta. Intenta reformularla con más detalle.",
           createdAt: new Date().toISOString(),
         });
       } else if (status === 403) {
@@ -95,7 +95,7 @@ export function useChatQuery() {
           id: crypto.randomUUID(),
           role: "assistant",
           content:
-            "No tenés permiso para usar el Chat IA. Esta función está disponible para gerentes y propietarios.",
+            "No tienes permiso para usar el Chat IA. Esta función está disponible para gerentes y propietarios.",
           createdAt: new Date().toISOString(),
         });
       } else {
@@ -104,7 +104,7 @@ export function useChatQuery() {
         toast.add({
           title: "Error de conexión",
           description:
-            "No se pudo conectar con el servidor. Verificá tu conexión e intentá de nuevo.",
+            "No se pudo conectar con el servidor. Verifica tu conexión e intenta de nuevo.",
           icon: "i-lucide-wifi-off",
         });
       }

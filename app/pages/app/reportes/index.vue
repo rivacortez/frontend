@@ -596,7 +596,7 @@ function periodLabel(p: string): string {
                 <div class="scr-stat"><dt><span class="rep-seg-dot s-b" />Soporte (B)</dt><dd>{{ paretoAbc.B.n }}</dd></div>
                 <div class="scr-stat"><dt><span class="rep-seg-dot s-c" />Cola (C)</dt><dd>{{ paretoAbc.C.n }}</dd></div>
               </dl>
-              <p class="rep-aside-foot">Las clase A concentran la mayor parte del ingreso: protegé su disponibilidad y su margen.</p>
+              <p class="rep-aside-foot">Las clase A concentran la mayor parte del ingreso: protege su disponibilidad y su margen.</p>
             </section>
           </aside>
         </div>
@@ -846,7 +846,7 @@ function periodLabel(p: string): string {
                 <div v-if="wasteTopReason" class="scr-stat"><dt>Costo de esa razón</dt><dd>{{ formatPEN(num(wasteTopReason.cost)) }}</dd></div>
                 <div class="scr-stat"><dt>Insumos afectados</dt><dd>{{ waste.data.value.byIngredient.length }}</dd></div>
               </dl>
-              <p class="rep-aside-foot">Registrá las salidas por merma desde Inventario para mantener el costeo y el food cost al día.</p>
+              <p class="rep-aside-foot">Registra las salidas por merma desde Inventario para mantener el costeo y el food cost al día.</p>
             </section>
           </aside>
         </div>
@@ -864,7 +864,7 @@ function periodLabel(p: string): string {
                 v-if="accuracy.data.value.needsMoreData"
                 icon="i-lucide-crosshair"
                 title="Aún no hay suficientes días para comparar"
-                :subtitle="accuracy.data.value.message ?? 'Aún no transcurrieron días proyectados para comparar el pronóstico con las ventas reales. Volvé a revisar en unos días.'"
+                :subtitle="accuracy.data.value.message ?? 'Aún no transcurrieron días proyectados para comparar el pronóstico con las ventas reales. Vuelve a revisar en unos días.'"
               />
               <template v-else>
                 <div class="rep-stat-grid three">

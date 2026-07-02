@@ -419,7 +419,7 @@ async function onClosePeriod(): Promise<void> {
               v-else
               icon="i-lucide-search-x"
               title="Sin resultados"
-              subtitle="No hay platos que coincidan con la búsqueda o el filtro. Probá con otro término o quitá el filtro de margen bajo."
+              subtitle="No hay platos que coincidan con la búsqueda o el filtro. Prueba con otro término o quita el filtro de margen bajo."
             />
           </section>
 

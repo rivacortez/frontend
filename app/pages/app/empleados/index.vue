@@ -271,7 +271,7 @@ async function deactivate(emp: Employee): Promise<void> {
       v-else-if="!isLoading && all.length === 0"
       icon="i-lucide-users"
       title="Aún no hay empleados"
-      subtitle="Registrá el primer empleado del equipo para hacer seguimiento del personal."
+      subtitle="Registra el primer empleado del equipo para hacer seguimiento del personal."
     >
       <button class="btn btn-primary" @click="openCreate">
         <UIcon name="i-lucide-plus" /> Nuevo empleado
@@ -363,7 +363,7 @@ async function deactivate(emp: Employee): Promise<void> {
             autocomplete="off"
             placeholder="1500.00"
           >
-          <small>Solo visible para vos como propietario/a.</small>
+          <small>Solo visible para ti como propietario/a.</small>
         </label>
 
         <!-- Active toggle: only shown when editing an existing employee -->

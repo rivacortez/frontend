@@ -139,7 +139,7 @@ function confirmClear(): void {
       <p class="access-title">Acceso restringido</p>
       <p class="access-body">
         El Chat IA está disponible para gerentes y propietarios.
-        Contactá a tu administrador si necesitás acceso.
+        Contacta a tu administrador si necesitas acceso.
       </p>
     </div>
   </div>
@@ -152,10 +152,10 @@ function confirmClear(): void {
         <div>
           <p class="eyebrow">Chat analítico · lenguaje natural → SQL</p>
           <h1 class="intro-h display">
-            ¿Qué querés saber<template v-if="firstName">, {{ firstName }}</template>?
+            ¿Qué quieres saber<template v-if="firstName">, {{ firstName }}</template>?
           </h1>
           <p class="intro-sub">
-            Escribí una pregunta sobre tus ventas, márgenes o stock. Armo la consulta
+            Escribe una pregunta sobre tus ventas, márgenes o stock. Armo la consulta
             sobre tus datos y te respondo con los números reales.
           </p>
         </div>
@@ -191,7 +191,7 @@ function confirmClear(): void {
         class="msg"
         :class="m.role === 'user' ? 'me' : 'ai'"
       >
-        <span class="msg-tag">{{ m.role === 'user' ? 'Vos' : 'GastronomIA' }}</span>
+        <span class="msg-tag">{{ m.role === 'user' ? 'Tú' : 'GastronomIA' }}</span>
         <div class="bubble">
           <!-- SQL generado (colapsable; cerrado por defecto) -->
           <div v-if="m.sql" class="sql">
@@ -296,7 +296,7 @@ function confirmClear(): void {
           ref="inputEl"
           v-model="text"
           class="composer-input"
-          placeholder="Preguntá sobre tu negocio…"
+          placeholder="Pregunta sobre tu negocio…"
           rows="1"
           aria-label="Escribe tu pregunta"
           :disabled="loading"

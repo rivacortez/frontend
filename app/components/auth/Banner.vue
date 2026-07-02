@@ -16,7 +16,7 @@ withDefaults(
     eyebrow: 'Para quienes cocinan con la cuenta clara',
     titleLead: 'Tu cocina,',
     titleAccent: 'en números claros.',
-    lead: 'Sabé cuánto deja cada plato, controlá tu stock y anticipá la demanda. Sin pelear con planillas.',
+    lead: 'Sabe cuánto deja cada plato, controla tu stock y anticipa la demanda. Sin pelear con planillas.',
     compact: false,
   },
 )
