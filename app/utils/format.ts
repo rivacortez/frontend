@@ -4,6 +4,22 @@ export function formatPEN(value: number): string {
 }
 
 /**
+ * Formatea una cantidad discreta con su unidad de negocio, p. ej. `"118
+ * platos"` (QA-23 — la serie del forecast del chat está en unidades, no en
+ * soles; ver `ChatForecastMeta.unitLabel`). Redondea porque el valor es una
+ * proyección del modelo, no una medición exacta con decimales significativos.
+ *
+ * @param value - Cantidad proyectada (unidades).
+ * @param unitLabel - Etiqueta declarada por el backend (p. ej. "platos").
+ *   Cuando falta (respuesta legacy sin este campo), se omite para no inventar
+ *   una unidad ni, peor, dar a entender que el número es dinero.
+ */
+export function formatUnits(value: number, unitLabel?: string): string {
+  const n = Math.round(value).toLocaleString("es-PE");
+  return unitLabel ? `${n} ${unitLabel}` : n;
+}
+
+/**
  * Coerción segura de un valor numérico del backend a `number`.
  *
  * POR QUÉ: los campos `Decimal` de Prisma (dinero, porcentajes) llegan del

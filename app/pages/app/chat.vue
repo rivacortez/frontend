@@ -249,16 +249,24 @@ function confirmClear(): void {
               Proyección · {{ m.forecast.range.label }}
             </p>
             <p class="forecast-total">
-              {{ formatPEN(m.forecast.totalYhat) }}
+              {{ formatUnits(m.forecast.totalYhat, m.forecast.unitLabel) }}
               <span class="forecast-band">
-                banda {{ formatPEN(m.forecast.totalLo) }} – {{ formatPEN(m.forecast.totalHi) }}
+                banda {{ formatUnits(m.forecast.totalLo, m.forecast.unitLabel) }} – {{ formatUnits(m.forecast.totalHi, m.forecast.unitLabel) }}
               </span>
+            </p>
+            <!-- Estimación en dinero: solo si el backend la declaró (requiere ventas
+                 recientes para calcular el ticket promedio) y es claramente derivada,
+                 nunca el número principal (QA-23: la serie del forecast es en unidades). -->
+            <p v-if="m.forecast.estimatedRevenue" class="forecast-revenue">
+              ≈ {{ formatPEN(m.forecast.estimatedRevenue.total) }} estimado
+              (ticket promedio {{ formatPEN(m.forecast.estimatedRevenue.avgUnitPrice) }},
+              últimos {{ m.forecast.estimatedRevenue.basisDays }} días)
             </p>
             <!-- Detalle por día: solo aporta si el rango cubre más de un día -->
             <ul v-if="m.forecast.points.length > 1" class="forecast-days">
               <li v-for="p in m.forecast.points" :key="p.targetDate">
                 <span class="forecast-day-date">{{ formatShortDate(p.targetDate) }}</span>
-                <span class="forecast-day-val">{{ formatPEN(p.yhat) }}</span>
+                <span class="forecast-day-val">{{ formatUnits(p.yhat, m.forecast.unitLabel) }}</span>
               </li>
             </ul>
             <ForecastDriverChips
@@ -551,6 +559,14 @@ function confirmClear(): void {
 .forecast-band {
   font-size: 12px;
   font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg2);
+}
+/* Estimación en dinero (QA-23) — deliberadamente sub-ordinada al total en
+   unidades: fuente menor, sin negrita, mismo tono muted que .forecast-band. */
+.forecast-revenue {
+  margin: 0;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--fg2);
 }

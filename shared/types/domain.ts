@@ -618,6 +618,23 @@ export interface ChatForecastRange {
 }
 
 /**
+ * Backend-declared derivation of the unit forecast into an estimated money
+ * amount (QA-23), using the tenant's average ticket price over a recent
+ * window. `null` when there is not enough recent sales history to derive a
+ * price — the UI must then show units only, never a fabricated currency
+ * figure.
+ */
+export interface ChatForecastEstimatedRevenue {
+  total: number;
+  lo: number;
+  hi: number;
+  /** Average unit price (PEN) used for the derivation. */
+  avgUnitPrice: number;
+  /** Size (in days) of the recent-sales window the average price was computed over. */
+  basisDays: number;
+}
+
+/**
  * Structured forecast payload attached to a `kind: 'future'` chat response
  * when the backend had a completed run covering the requested range (F2b /
  * LOTE B3). Carries the SAME numbers already narrated in `ChatMessage.content`
@@ -626,6 +643,11 @@ export interface ChatForecastRange {
  * answer string. Absent when `kind === 'future'` but the backend had no data
  * for the range (e.g. `needsForecast`/out-of-horizon) — in that case only
  * `content` carries the explanation.
+ *
+ * IMPORTANT (QA-23): `totalYhat`/`totalLo`/`totalHi` and every `points[]`
+ * entry are expressed in UNITS (see `unitLabel`, e.g. "platos"), never in
+ * currency. `estimatedRevenue` is a separate, explicitly-derived money figure
+ * — render it as a secondary line, not as the headline number.
  */
 export interface ChatForecastMeta {
   /** `ForecastRun` id backing these numbers — for traceability/audit. */
@@ -638,6 +660,19 @@ export interface ChatForecastMeta {
   points: ChatForecastPoint[];
   /** Exogenous drivers (holidays, payday, weather...) within the same range. */
   drivers: ForecastDriver[];
+  /**
+   * Unit of `totalYhat`/`totalLo`/`totalHi`/`points[].yhat*` (e.g. "platos").
+   * Optional — absent on legacy responses fetched before this field shipped
+   * (an already-rendered message in an open chat thread); treat a missing
+   * value as unitless rather than defaulting to currency.
+   */
+  unitLabel?: string;
+  /**
+   * Money estimate derived from the unit forecast, or `null` when the
+   * backend had no recent sales to derive a price from. Absent (not just
+   * `null`) on legacy responses — see `unitLabel`.
+   */
+  estimatedRevenue?: ChatForecastEstimatedRevenue | null;
 }
 
 export interface ChatMessage {

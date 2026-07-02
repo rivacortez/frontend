@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type {
+  ChatForecastEstimatedRevenue,
   ChatForecastMeta,
   ChatForecastPoint,
   ChatQueryKind,
@@ -27,6 +28,11 @@ interface BeChatForecastPoint {
  * `chatForecastMetaSchema` in `src/shared/chat/chat.ts` on team-backend).
  * Top-level keys are already camelCase; only the nested `points`/`drivers`
  * inherit core-ai's snake_case field names, so those need mapping.
+ *
+ * `unitLabel`/`estimatedRevenue` were added ADDITIVELY by the backend fix for
+ * QA-23 (the series was in units all along; the fix just declares the unit
+ * and, separately, a derived money estimate) — both are optional here so a
+ * backend that hasn't shipped the fix yet still round-trips without error.
  */
 interface BeChatForecastMeta {
   runId: string;
@@ -36,6 +42,8 @@ interface BeChatForecastMeta {
   totalHi: number;
   points: BeChatForecastPoint[];
   drivers: BeForecastDriver[];
+  unitLabel?: string;
+  estimatedRevenue?: ChatForecastEstimatedRevenue | null;
 }
 
 /** Raw shape of the data object returned by POST /api/chat/query on the NestJS backend. */
@@ -103,6 +111,8 @@ function toForecastMeta(f: BeChatForecastMeta): ChatForecastMeta {
     totalHi: f.totalHi,
     points: f.points.map(toForecastPoint),
     drivers: f.drivers.map(toDriver),
+    unitLabel: f.unitLabel,
+    estimatedRevenue: f.estimatedRevenue,
   };
 }
 
