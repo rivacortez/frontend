@@ -1,5 +1,8 @@
 import type { H3Event } from "h3";
 import type {
+  ForecastContextStatus,
+  ForecastDriver,
+  ForecastInsightsView,
   ForecastShoppingItem,
   ForecastShoppingSuggestionsView,
 } from "#shared/types/domain";
@@ -29,16 +32,60 @@ interface BeForecastSuggestion {
   suggestedQty: string;
 }
 
+/**
+ * Driver as emitted by the backend (`src/shared/forecasting/forecast.ts`,
+ * `forecastDriverSchema`) — `kind` is a widened string (not the backend's
+ * strict enum) because a still-unknown kind must survive the round trip and
+ * degrade to a generic badge client-side, never throw during JSON parsing.
+ */
+interface BeForecastDriver {
+  date: string;
+  kind: string;
+  label: string;
+  impact_pct: number | null;
+}
+
 interface BeForecastShoppingSuggestionsData {
   horizon: number;
   source: "forecast";
   runId: string | null;
   needsForecast: boolean;
   suggestions: BeForecastSuggestion[];
+  drivers: BeForecastDriver[];
+  contextStatus: ForecastContextStatus | null;
+}
+
+interface BeForecastInsightsBacktest {
+  modelSmape: number;
+  baselineSmape: number;
+  improvementPct: number;
+  modelSmapeNoContext: number | null;
+  contextImprovementPct: number | null;
+}
+
+interface BeForecastInsightsData {
+  runId: string | null;
+  status: "running" | "completed" | "failed" | null;
+  contextStatus: ForecastContextStatus | null;
+  horizon: number | null;
+  generatedAt: string | null;
+  upcomingDrivers: BeForecastDriver[];
+  backtest: BeForecastInsightsBacktest | null;
+  needsForecast: boolean;
 }
 
 const num = (s: string | null | undefined): number =>
   s == null ? 0 : Number(s);
+
+/** Maps the backend's snake_case driver shape to the frontend's camelCase view. */
+function toDriver(d: BeForecastDriver): ForecastDriver {
+  return {
+    date: d.date,
+    kind: d.kind,
+    label: d.label,
+    impactPct: d.impact_pct,
+  };
+}
 
 /**
  * Fetches demand-forecast shopping suggestions from `GET /api/forecasting/shopping-suggestions`
@@ -71,7 +118,13 @@ export async function forecastShoppingSuggestions(
   const { horizon: h, needsForecast } = res.data;
 
   if (needsForecast) {
-    return { horizon: h, needsForecast: true, suggestions: [] };
+    return {
+      horizon: h,
+      needsForecast: true,
+      suggestions: [],
+      drivers: [],
+      contextStatus: null,
+    };
   }
 
   const suggestions: ForecastShoppingItem[] = res.data.suggestions.map((s) => {
@@ -94,5 +147,50 @@ export async function forecastShoppingSuggestions(
     };
   });
 
-  return { horizon: h, needsForecast: false, suggestions };
+  return {
+    horizon: h,
+    needsForecast: false,
+    suggestions,
+    drivers: res.data.drivers.map(toDriver),
+    contextStatus: res.data.contextStatus,
+  };
+}
+
+/**
+ * Fetches the narrated forecast summary from `GET /api/forecasting/insights`
+ * (owner/manager only — the backend returns 403 for staff) and maps it to the
+ * frontend `ForecastInsightsView`.
+ *
+ * Deliberately drops the raw backtest fields (`modelSmape`, `baselineSmape`,
+ * `modelSmapeNoContext`, `contextImprovementPct`) before they reach the
+ * client: those are academic backtest internals, not something a restaurant
+ * owner should see, and `contextImprovementPct` can be negative on the demo
+ * dataset (see engram HU-08-07 fase 2 notes) which would read as "the AI made
+ * things worse" — misleading for a metric that isn't the point of the panel.
+ * Only `improvementPct` (model vs. naive baseline) survives, as the single
+ * credibility signal worth narrating.
+ *
+ * When `needsForecast` is true the tenant has no completed run yet — callers
+ * MUST render an explicit empty/CTA state, not a panel with blank numbers.
+ *
+ * @param event Nitro H3 event (session token extracted server-side).
+ */
+export async function forecastInsights(
+  event: H3Event,
+): Promise<ForecastInsightsView> {
+  const res = await backendFetch<Envelope<BeForecastInsightsData>>(
+    event,
+    "/api/forecasting/insights",
+  );
+  const { horizon, contextStatus, generatedAt, needsForecast, backtest } =
+    res.data;
+
+  return {
+    needsForecast,
+    contextStatus,
+    horizon,
+    generatedAt,
+    upcomingDrivers: res.data.upcomingDrivers.map(toDriver),
+    improvementPct: backtest?.improvementPct ?? null,
+  };
 }

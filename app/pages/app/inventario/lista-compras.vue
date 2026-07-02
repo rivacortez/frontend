@@ -7,7 +7,7 @@ useSeoMeta({ title: 'Lista de Compras — GastronomIA' })
 // Widget A: the shopping list is now seeded from the demand forecast (E08 / core-ai)
 // instead of from stock alerts. `needsForecast` must be surfaced as an explicit empty
 // state — never silently show zero items as "nothing to buy".
-const { suggestions, refresh, horizon, needsForecast } = useForecastShoppingSuggestions()
+const { suggestions, refresh, horizon, needsForecast, drivers, contextStatus } = useForecastShoppingSuggestions()
 const patchItem = usePatchShoppingItem()
 const createMovement = useCreateMovement()
 const clearPurchased = useClearPurchased()
@@ -22,6 +22,16 @@ const checked = computed(() => list.value.filter(i => i.checked))
 const total = computed(() => pending.value.reduce((s, i) => s + i.estimatedCost, 0))
 const urgentCount = computed(() => pending.value.filter(i => i.urgent).length)
 // NOTE: AI savings estimate de-scoped (requires supplier price comparison E05-b).
+
+// HU-08-07 (fase 3) · Franja de contexto del forecast: los factores exógenos
+// (feriados, eventos gastronómicos, clima, quincena, fines de semana) que
+// explican los shortfalls de abajo. `off` → el run no pidió contexto (no
+// debería pasar en corridas de negocio); se oculta la franja por completo en
+// vez de mostrar una nota confusa sobre algo que nunca se pidió.
+const showDriversStrip = computed(() =>
+  !needsForecast.value && contextStatus.value !== null && contextStatus.value !== 'off',
+)
+const showWeatherDownNote = computed(() => contextStatus.value === 'calendar_only')
 
 const dateLabel = computed(() => {
   const label = new Intl.DateTimeFormat('es-PE', {
@@ -109,6 +119,15 @@ function share(): void {
         <UButton icon="i-lucide-share-2" color="neutral" variant="outline" size="sm" aria-label="Compartir lista" @click="share" />
       </template>
     </UiScreenHeader>
+
+    <!-- Contexto del forecast (HU-08-07 fase 3): factores que explican la demanda proyectada -->
+    <section v-if="showDriversStrip" class="sl-drivers" aria-label="Factores que influyen en el pronóstico">
+      <ForecastDriverChips :drivers="drivers" :max-chips="4" />
+      <p v-if="showWeatherDownNote" class="sl-drivers-note">
+        <UIcon name="i-lucide-cloud-off" aria-hidden="true" />
+        Pronóstico sin datos de clima
+      </p>
+    </section>
 
     <!-- Resumen -->
     <section class="sl-summary" aria-label="Resumen de la lista">
@@ -222,6 +241,16 @@ function share(): void {
   margin: 0 auto;
   padding-bottom: 24px;
 }
+.sl-drivers {
+  margin: 0 20px 16px;
+}
+.sl-drivers-note {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--fg2);
+  margin: 8px 2px 0;
+}
+.sl-drivers-note .iconify { width: 13px; height: 13px; flex-shrink: 0; }
+
 .sl-summary {
   margin: 0 20px 20px;
   background: var(--pure-white);

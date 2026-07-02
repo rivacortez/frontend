@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useAdminDashboard, useManagerDashboard, useCashierDashboard } from '~/composables/use-reports'
+import { useAdminDashboard, useManagerDashboard, useCashierDashboard, useForecastInsights } from '~/composables/use-reports'
 
 definePageMeta({ layout: 'app' })
 useSeoMeta({ title: 'Inicio — GastronomIA' })
@@ -42,6 +42,30 @@ const admin = useAdminDashboard(() => isOwner.value)
 const manager = useManagerDashboard(() => canManage.value && !isOwner.value)
 const cashier = useCashierDashboard(() => !canManage.value)
 const tables = useTables()
+
+// E08 / HU-08-07 (fase 3) · "Lo que se viene" — narrativa del forecast contextual.
+// Gateado a owner/manager: el backend devuelve 403 a staff, así que ni se dispara
+// la request para ese rol (mismo criterio que `manager`/`admin` arriba).
+const insights = useForecastInsights(() => canManage.value)
+const insightsLoading = computed(() => insights.isLoading.value && !insights.data.value)
+const insightsNeedsForecast = computed(() => insights.data.value?.needsForecast ?? false)
+const insightsDrivers = computed(() => insights.data.value?.upcomingDrivers ?? [])
+const insightsContextStatus = computed(() => insights.data.value?.contextStatus ?? null)
+// Único dato de credibilidad expuesto al owner/manager: mejora del modelo vs.
+// el baseline ingenuo, en lenguaje humano. La comparativa con/sin contexto
+// (`contextImprovementPct`) y el sMAPE crudo son internos del backtest y NO
+// se narran acá (ver `ForecastInsightsView` en shared/types/domain.ts).
+const improvementRounded = computed(() => {
+  const pct = insights.data.value?.improvementPct
+  return pct == null ? null : Math.round(pct)
+})
+const accuracyMessage = computed(() => {
+  const pct = improvementRounded.value
+  if (pct === null) return null
+  return pct > 0
+    ? `Proyección ${pct}% más precisa que el promedio histórico`
+    : 'Precisión en línea con el promedio histórico'
+})
 
 const primary = computed(() => (isOwner.value ? admin : canManage.value ? manager : cashier))
 const kpisLoading = computed(() => primary.value.isLoading.value && !primary.value.data.value)
@@ -226,6 +250,48 @@ const shortcuts = computed(() => [
         <NuxtLink to="/app/reportes" class="link">Ver reportes</NuxtLink>
       </div>
       <ChartsAreaChart :data="salesSeries" unit="S/" />
+    </section>
+
+    <!-- "Lo que se viene" (E08 / HU-08-07 fase 3): narrativa de drivers del forecast -->
+    <section v-if="canManage" class="panel forecast-panel" aria-label="Lo que se viene">
+      <div class="panel-head">
+        <span class="section-title">Lo que se viene</span>
+        <NuxtLink to="/app/inventario/lista-compras" class="link">Ver lista de compras</NuxtLink>
+      </div>
+
+      <div v-if="insightsLoading" class="state" aria-busy="true">
+        <span class="sk sk-l" /><span class="sk sk-f" />
+      </div>
+
+      <div v-else-if="insights.error.value" class="state">
+        <p>No se pudo cargar el pronóstico.</p>
+        <button class="btn btn-ghost" @click="insights.refresh()"><UIcon name="i-lucide-rotate-cw" /> Reintentar</button>
+      </div>
+
+      <UiEmptyState
+        v-else-if="insightsNeedsForecast"
+        icon="i-lucide-bar-chart-2"
+        title="Forecast no disponible"
+        subtitle="Aún no hay un análisis de demanda completado para narrar los próximos días."
+      >
+        <NuxtLink to="/app/inventario/lista-compras" class="btn btn-ghost">Ir a lista de compras</NuxtLink>
+      </UiEmptyState>
+
+      <div v-else class="forecast-body">
+        <ForecastDriverChips :drivers="insightsDrivers" :max-chips="3" />
+        <p v-if="insightsDrivers.length === 0" class="forecast-empty">
+          Sin factores destacados en el horizonte actual.
+        </p>
+        <p v-if="insightsContextStatus === 'calendar_only'" class="forecast-note">
+          <UIcon name="i-lucide-cloud-off" aria-hidden="true" /> Pronóstico sin datos de clima
+        </p>
+        <p v-if="accuracyMessage" class="forecast-accuracy">
+          <span v-if="improvementRounded && improvementRounded > 0" class="delta is-up">
+            <UIcon name="i-lucide-trending-up" class="delta-ico" />+{{ improvementRounded }}%
+          </span>
+          <span>{{ accuracyMessage }}</span>
+        </p>
+      </div>
     </section>
 
     <!-- Cuerpo: top platos + accesos -->
@@ -453,6 +519,24 @@ const shortcuts = computed(() => [
 .trend-title { display: flex; flex-direction: column; gap: 6px; }
 .trend-total { font-size: clamp(22px, 2.6vw, 30px); color: var(--fg1); line-height: 1; }
 .trend-total .cur { font-size: 0.5em; font-weight: 600; color: var(--fg3); vertical-align: 0.4em; margin-right: 2px; }
+
+/* "Lo que se viene" — reutiliza .panel/.panel-head/.section-title/.link ya
+   definidos arriba y .delta.is-up (mismo lenguaje visual que los KPIs). */
+.forecast-body { display: flex; flex-direction: column; gap: 10px; }
+.forecast-empty { font-size: 13px; color: var(--fg2); margin: 0; }
+.forecast-note {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg2);
+  margin: 0;
+}
+.forecast-note .iconify { width: 13px; height: 13px; flex-shrink: 0; }
+.forecast-accuracy {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--fg2);
+  margin: 2px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
 
 /* Cuerpo: dos columnas en desktop */
 .body {
