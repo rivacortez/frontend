@@ -1,5 +1,6 @@
 import type { H3Event } from "h3";
 import type {
+  ForecastAccuracyView,
   ForecastContextStatus,
   ForecastDriver,
   ForecastInsightsView,
@@ -74,6 +75,34 @@ interface BeForecastInsightsData {
   needsForecast: boolean;
 }
 
+/**
+ * Accuracy point/metrics as emitted by `GET /forecasting/accuracy`
+ * (`forecast-accuracy.ts` on team-backend) — already plain numbers, not
+ * Decimal strings, since these are computed metrics rather than DB money.
+ */
+interface BeForecastAccuracyPoint {
+  date: string;
+  predicted: number;
+  actual: number;
+  yhatLo: number;
+  yhatHi: number;
+}
+
+interface BeForecastAccuracyMetrics {
+  smapeRealized: number | null;
+  mapeRealized: number | null;
+  coveragePct: number | null;
+  points: number;
+}
+
+interface BeForecastAccuracyData {
+  series: BeForecastAccuracyPoint[];
+  metrics: BeForecastAccuracyMetrics;
+  runsEvaluated: number;
+  needsMoreData: boolean;
+  message?: string;
+}
+
 const num = (s: string | null | undefined): number =>
   s == null ? 0 : Number(s);
 
@@ -141,6 +170,10 @@ export async function forecastShoppingSuggestions(
       shortfall,
       suggestedQty,
       estimatedCost: +(suggestedQty * unitCost).toFixed(2),
+      // Cost to cover the gap itself (F2a "S/ en riesgo") — see the TSDoc on
+      // `ForecastShoppingItem.shortfallCost` for why this stays separate
+      // from `estimatedCost` even though both use `unitCost` today.
+      shortfallCost: +(shortfall * unitCost).toFixed(2),
       reason: `Déficit de forecast: ${shortfall} ${s.unit}`,
       urgent: shortfall > 0,
       checked: false,
@@ -193,4 +226,32 @@ export async function forecastInsights(
     upcomingDrivers: res.data.upcomingDrivers.map(toDriver),
     improvementPct: backtest?.improvementPct ?? null,
   };
+}
+
+/**
+ * Fetches the forecast self-evaluation from `GET /api/forecasting/accuracy`
+ * (HU-08-08, "el sistema se autoevalúa" — F2a) and maps it 1:1 to the
+ * frontend `ForecastAccuracyView`. Unlike the shopping/insights adapters,
+ * every numeric field here is already a plain number on the backend
+ * (computed metrics, not Prisma `Decimal` money) — no string coercion needed.
+ *
+ * `needsMoreData: true` means too few elapsed forecast days exist for the
+ * metrics to be representative (includes the 0-runs case). Callers MUST
+ * render an explicit explanatory state, never a chart with near-empty data.
+ *
+ * @param event Nitro H3 event (session token extracted server-side).
+ * @param scope 'total' (default) or 'menuItem' — same ambit as `/predictions`.
+ * @param menuItemId Required by the backend when `scope === 'menuItem'`.
+ */
+export async function forecastAccuracy(
+  event: H3Event,
+  scope?: string,
+  menuItemId?: string,
+): Promise<ForecastAccuracyView> {
+  const res = await backendFetch<Envelope<BeForecastAccuracyData>>(
+    event,
+    "/api/forecasting/accuracy",
+    { query: { scope, menuItemId } },
+  );
+  return res.data;
 }

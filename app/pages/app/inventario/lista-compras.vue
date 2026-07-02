@@ -8,6 +8,23 @@ useSeoMeta({ title: 'Lista de Compras — GastronomIA' })
 // instead of from stock alerts. `needsForecast` must be surfaced as an explicit empty
 // state — never silently show zero items as "nothing to buy".
 const { suggestions, refresh, horizon, needsForecast, drivers, contextStatus } = useForecastShoppingSuggestions()
+
+// F2a · "S/ en riesgo esta semana" — segunda consulta al mismo endpoint con un
+// horizonte de 7 días (real "esta semana"), distinto del horizonte de la lista
+// de compras (`horizon`, 14 días por defecto). Reusar la consulta de 14 días
+// y llamarla "esta semana" sería incorrecto — el backend no da un desglose
+// diario dentro de un horizonte, así que la única forma honesta de aislar la
+// ventana semanal es pedirla explícitamente.
+const RISK_HORIZON_DAYS = 7
+const risk = useForecastShoppingSuggestions(RISK_HORIZON_DAYS)
+// Se usa la data cruda (no el `suggestions` fusionado con el overlay de
+// "marcado"): el riesgo financiero de esta semana es un dato operativo — no
+// debe desaparecer solo porque el usuario tildó el ítem en su checklist local
+// sin haber comprado todavía.
+const riskItems = computed(() => risk.data.value?.suggestions ?? [])
+const atRiskTotal = computed(() => riskItems.value.reduce((s, i) => s + i.shortfallCost, 0))
+const riskReady = computed(() => !risk.needsForecast.value && !!risk.data.value)
+
 const patchItem = usePatchShoppingItem()
 const createMovement = useCreateMovement()
 const clearPurchased = useClearPurchased()
@@ -126,6 +143,32 @@ function share(): void {
       <p v-if="showWeatherDownNote" class="sl-drivers-note">
         <UIcon name="i-lucide-cloud-off" aria-hidden="true" />
         Pronóstico sin datos de clima
+      </p>
+    </section>
+
+    <!-- F2a · Dinero en riesgo esta semana: costo de reposición del déficit de
+         stock proyectado a 7 días — distinto del "Total estimado" de abajo
+         (que cubre el horizonte completo de la lista, {{ horizon }} días). -->
+    <section class="sl-risk" aria-label="Dinero en riesgo esta semana">
+      <div v-if="riskReady && atRiskTotal > 0" class="sl-risk-body">
+        <span class="sl-risk-ico" aria-hidden="true"><UIcon name="i-lucide-trending-down" /></span>
+        <div class="sl-risk-text">
+          <span class="sl-risk-headline">
+            <span class="sl-risk-amount">{{ formatPEN(atRiskTotal) }}</span>
+            <span class="sl-risk-label">en riesgo esta semana</span>
+          </span>
+          <span class="sl-risk-note">
+            Costo de reposición para cubrir el déficit de stock proyectado en los próximos {{ RISK_HORIZON_DAYS }} días — no es una estimación de ventas perdidas.
+          </span>
+        </div>
+      </div>
+      <p v-else-if="riskReady" class="sl-risk-ok">
+        <UIcon name="i-lucide-check-circle-2" aria-hidden="true" /> Sin riesgo de stock proyectado esta semana.
+      </p>
+      <p v-else-if="risk.isLoading.value" class="sl-risk-status">Calculando riesgo de esta semana…</p>
+      <p v-else-if="risk.error.value" class="sl-risk-status">
+        No se pudo calcular el riesgo de esta semana.
+        <button type="button" class="sl-risk-retry" @click="risk.refresh()">Reintentar</button>
       </p>
     </section>
 
@@ -250,6 +293,45 @@ function share(): void {
   margin: 8px 2px 0;
 }
 .sl-drivers-note .iconify { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* F2a · "S/ en riesgo esta semana" — misma escala/gutter que .sl-drivers para
+   leerse como parte de la misma franja narrativa (drivers → riesgo → plan). */
+.sl-risk { margin: 0 20px 16px; }
+.sl-risk-body {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--pure-white);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.sl-risk-ico {
+  width: 30px; height: 30px; border-radius: 9px;
+  /* Mismo par de tokens que `.sl-sum-foot .robot` más abajo — un solo acento
+     tintado reutilizado en toda la pantalla, no uno nuevo por widget. */
+  background: var(--terracotta-100); color: var(--terracotta-700);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.sl-risk-ico .iconify { width: 16px; height: 16px; }
+.sl-risk-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sl-risk-headline { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.sl-risk-amount {
+  font-family: var(--font-serif); font-style: italic; font-weight: 600;
+  font-size: 21px; color: var(--fg1); letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.sl-risk-label { font-size: 12.5px; font-weight: 600; color: var(--fg2); }
+.sl-risk-note { font-size: 11.5px; color: var(--fg3); line-height: 1.45; }
+.sl-risk-ok, .sl-risk-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--fg3);
+  padding: 2px 2px;
+}
+.sl-risk-ok .iconify { width: 14px; height: 14px; color: var(--oliva-700); flex-shrink: 0; }
+.sl-risk-retry {
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--terracotta-700);
+  background: none; border: none; text-decoration: underline; cursor: pointer; padding: 0;
+}
 
 .sl-summary {
   margin: 0 20px 20px;

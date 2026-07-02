@@ -251,6 +251,17 @@ export interface ForecastShoppingItem extends ShoppingItem {
   currentStock: number;
   forecastConsumption: number;
   shortfall: number;
+  /**
+   * `shortfall × unitCost` — the cost of covering the projected demand gap
+   * (F2a "S/ en riesgo"). Deliberately DISTINCT from `estimatedCost`
+   * (`suggestedQty × unitCost`, the recommended purchase): the backend
+   * currently sets `suggestedQty = shortfall` (see
+   * `shopping-suggestions.ts` on team-backend) so they read the same today,
+   * but `suggestedQty` is documented to diverge once purchase-lot rounding
+   * ships — `shortfallCost` must keep meaning "cost to cover the gap", not
+   * "cost of the recommended purchase", regardless of future lot sizing.
+   */
+  shortfallCost: number;
 }
 
 /**
@@ -322,6 +333,50 @@ export interface ForecastInsightsView {
   upcomingDrivers: ForecastDriver[];
   /** Model accuracy vs. the naive baseline, in percent; `null` when unavailable. */
   improvementPct: number | null;
+}
+
+/**
+ * A single already-elapsed day: what the forecast predicted (with its
+ * [yhatLo, yhatHi] band) vs. what actually sold, per
+ * `GET /forecasting/accuracy` (HU-08-08, "el sistema se autoevalúa").
+ */
+export interface ForecastAccuracyPoint {
+  date: string;
+  predicted: number;
+  actual: number;
+  yhatLo: number;
+  yhatHi: number;
+}
+
+/**
+ * Aggregate accuracy metrics over `series`. `smapeRealized`/`mapeRealized`
+ * are REALIZED error (predicted vs. real sales), not the model's internal
+ * backtest — see `ForecastInsightsView.improvementPct` for that. `null`
+ * when there are 0 comparable points. `coveragePct` = % of days whose real
+ * value fell inside [yhatLo, yhatHi] (interval calibration).
+ */
+export interface ForecastAccuracyMetrics {
+  smapeRealized: number | null;
+  mapeRealized: number | null;
+  coveragePct: number | null;
+  points: number;
+}
+
+/**
+ * View for the "Precisión del pronóstico" screen (F2a) — the thesis's
+ * self-evaluation evidence. `needsMoreData: true` means too few elapsed
+ * forecast days exist yet for the metrics to be meaningful (includes the
+ * zero-runs case); the UI MUST show an explanatory state, never a chart
+ * with near-empty data. `message` carries the backend's explanation in that
+ * case.
+ */
+export interface ForecastAccuracyView {
+  series: ForecastAccuracyPoint[];
+  metrics: ForecastAccuracyMetrics;
+  /** Number of completed forecast runs that contributed at least one elapsed day. */
+  runsEvaluated: number;
+  needsMoreData: boolean;
+  message?: string;
 }
 
 /**
