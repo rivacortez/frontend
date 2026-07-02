@@ -16,7 +16,22 @@ const TOTAL_STEPS = 3
 const step = ref<1 | 2 | 3>(1)
 
 /* ===== Paso 1 · Datos básicos ===== */
-const CATEGORIES = ['Marinos', 'Criollos', 'Entradas', 'Piqueos', 'Cocteles', 'Bases']
+
+// QA-19: el wizard ofrecía una taxonomía hardcodeada (Marinos/Criollos/Piqueos/
+// Cocteles/Bases) que no coincidía con las categorías reales de la carta —
+// las que efectivamente usan el catálogo de Recetas y el POS. Derivamos las
+// categorías vigentes de los platos existentes del tenant, con el mismo
+// criterio que ya usan `recetas/index.vue` y `pos/CatalogSheet.vue` (iterar
+// `recipe.category` de los platos reales), para que "Nueva receta" ofrezca
+// exactamente lo que el cliente ya ve en el POS. `allRecipes` se declara más
+// abajo (también alimenta el selector de sub-recetas).
+const CATEGORIES = computed<string[]>(() => {
+  const seen: string[] = []
+  for (const r of allRecipes.value ?? []) {
+    if (r.kind === 'dish' && !seen.includes(r.category)) seen.push(r.category)
+  }
+  return seen.sort((a, b) => a.localeCompare(b, 'es'))
+})
 
 const TIME_OPTIONS = [
   { id: 't1', label: '< 5 min', minutes: 5 },

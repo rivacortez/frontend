@@ -105,6 +105,18 @@ interface EditableIngredient extends PreviewIngredient {
 let _keySeq = 0
 const reviewMenuItems = ref<EditableMenuItem[]>([])
 const reviewIngredients = ref<EditableIngredient[]>([])
+
+/**
+ * QA-11: `isEmpty` (abajo) solo mira el conteo ACTUAL de filas, así que no
+ * puede distinguir "la IA no encontró nada en el archivo" de "el usuario
+ * borró todas las filas durante la revisión" — ambos casos terminan con 0
+ * platos y 0 insumos, pero requieren mensajes distintos. Este flag captura
+ * el resultado ORIGINAL de la extracción (se fija una sola vez, al terminar
+ * `handleFile`) para que el banner de "nada para importar" pueda mostrar el
+ * mensaje correcto en cada caso.
+ */
+const extractionFoundNothing = ref(false)
+
 const commitResult = ref<{
   created: { menuItems: number; ingredients: number; categories: number }
   skipped: string[]
@@ -229,6 +241,9 @@ async function handleFile(file: File): Promise<void> {
     estimatedCost: item.estimatedCost ?? null,
   }))
 
+  // Snapshot del resultado crudo de la IA, antes de que el usuario pueda editar/borrar filas.
+  extractionFoundNothing.value = reviewMenuItems.value.length === 0 && reviewIngredients.value.length === 0
+
   phase.value = 'review'
 }
 
@@ -264,6 +279,7 @@ function cancelReview(): void {
   reviewIngredients.value = []
   previewProvider.value = ''
   pickedFileName.value = ''
+  extractionFoundNothing.value = false
 }
 
 /**
@@ -329,6 +345,7 @@ function startOver(): void {
   commitResult.value = null
   previewProvider.value = ''
   pickedFileName.value = ''
+  extractionFoundNothing.value = false
 }
 </script>
 
@@ -710,10 +727,22 @@ function startOver(): void {
           </div>
         </div>
 
-        <!-- Empty state when user removed everything -->
+        <!-- Empty state: distingue "la IA no encontró nada en el archivo" (QA-11) de
+             "el usuario eliminó todas las filas durante la revisión". -->
         <div v-if="isEmpty" class="ic-empty-warning" role="alert">
-          <UIcon name="i-lucide-alert-circle" aria-hidden="true" />
-          <span>Eliminaste todos los elementos. No hay nada para importar.</span>
+          <template v-if="extractionFoundNothing">
+            <UIcon name="i-lucide-file-search" aria-hidden="true" />
+            <span>
+              La IA no encontró platos ni insumos en este archivo. Verificá que tenga una
+              tabla o lista reconocible (nombre + precio para platos, nombre + unidad para
+              insumos) — funciona mejor con un PDF o Excel exportado directo de tu carta,
+              o un CSV con columnas claras.
+            </span>
+          </template>
+          <template v-else>
+            <UIcon name="i-lucide-alert-circle" aria-hidden="true" />
+            <span>Eliminaste todos los elementos. No hay nada para importar.</span>
+          </template>
         </div>
 
         <!-- Actions -->
