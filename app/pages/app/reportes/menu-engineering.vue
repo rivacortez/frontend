@@ -132,21 +132,23 @@ const matrixData = computed((): MatrixData | null => {
 
   const cutoffCM = parseFloat(d.avgContributionMargin)
   // Add 20% headroom above the largest value so no dot touches the edge.
-  const maxPop = Math.max(...d.items.map(i => i.popularityShare)) * 1.2 || 1
+  // popularityShare/popularityCutoff are Decimal strings (see
+  // MenuEngineeringReportView) — coerce with `num()` before any arithmetic.
+  const maxPop = Math.max(...d.items.map(i => num(i.popularityShare))) * 1.2 || 1
   const maxCM =
     Math.max(...d.items.map(i => parseFloat(i.contributionMargin))) * 1.2 || 1
 
   const toX = (pop: number) => PAD_L + (pop / maxPop) * PLOT_W
   const toY = (cm: number) => PAD_T + PLOT_H - (cm / maxCM) * PLOT_H
 
-  const xCutoffSvg = toX(d.popularityCutoff)
+  const xCutoffSvg = toX(num(d.popularityCutoff))
   const yCutoffSvg = toY(cutoffCM)
 
   const plotRight = PAD_L + PLOT_W
   const plotBottom = PAD_T + PLOT_H
 
   const points: PlotPoint[] = d.items.map(item => {
-    const x = toX(item.popularityShare)
+    const x = toX(num(item.popularityShare))
     const y = toY(parseFloat(item.contributionMargin))
     // Label placement: keep labels away from the quadrant divider and plot edges.
     const onRight = x >= xCutoffSvg
@@ -256,7 +258,9 @@ const classCounts = computed(() => {
   return acc
 })
 
-const num = (s: string | undefined | null) => Number(s ?? 0)
+// Decimal strings from the backend (price, contributionMargin, popularityShare,
+// popularityCutoff, avgContributionMargin) — see app/utils/format.ts `toNumber`.
+const num = (s: string | number | undefined | null) => toNumber(s)
 
 // ===== Error handling =====
 watch(
@@ -301,6 +305,13 @@ watch(
       </div>
     </div>
 
+    <!--
+      Guard against render exceptions from unexpected field shapes (same class
+      of bug as prime-cost.vue's crash): without this, a throw here would leave
+      the view stuck on the loading skeleton instead of showing a recoverable
+      error state. See prime-cost.vue for the paired fix.
+    -->
+    <NuxtErrorBoundary>
     <div class="scr-body">
       <div class="scr-main">
         <RepError v-if="me.error.value" @retry="me.refresh()" />
@@ -650,6 +661,15 @@ watch(
         </section>
       </aside>
     </div>
+
+    <template #error="{ clearError }">
+      <div class="scr-body">
+        <div class="scr-main">
+          <RepError @retry="() => { clearError(); me.refresh() }" />
+        </div>
+      </div>
+    </template>
+    </NuxtErrorBoundary>
   </div>
 </template>
 

@@ -59,12 +59,13 @@ const rangeLabel = computed(() => {
 })
 
 /* ============ helpers ============ */
-const num = (s: string | undefined | null): number => Number(s ?? 0)
+// Decimal strings from the backend (Prisma `Decimal`) — see app/utils/format.ts.
+const num = (s: string | number | undefined | null): number => toNumber(s)
 function fmtDay(dayKey: string): string {
   return new Date(`${dayKey}T12:00:00Z`).toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })
 }
-function fmtPct(s: string | number): string {
-  return `${Number(s).toFixed(1)}%`
+function fmtPct(s: string | number | undefined | null): string {
+  return formatPercent(s, 1)
 }
 function abcClassLabel(c: 'A' | 'B' | 'C'): string {
   return c === 'A' ? 'Estrella (A)' : c === 'B' ? 'Soporte (B)' : 'Cola (C)'
@@ -237,7 +238,7 @@ function periodLabel(p: string): string {
             <div class="rep-stat-grid">
               <div class="rep-stat accent">
                 <span class="rep-stat-k">Total cobrado</span>
-                <span class="rep-stat-v"><span class="cur">S/</span>{{ num(cashier.data.value.totalCollected).toLocaleString('es-PE') }}</span>
+                <span class="rep-stat-v"><span class="cur">S/</span>{{ num(cashier.data.value.totalCollected).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 <span class="rep-stat-meta">{{ cashier.data.value.salesCount }} ticket{{ cashier.data.value.salesCount === 1 ? '' : 's' }}</span>
               </div>
               <div class="rep-stat">
@@ -277,7 +278,7 @@ function periodLabel(p: string): string {
             <div class="rep-stat-grid">
               <div class="rep-stat accent">
                 <span class="rep-stat-k">Ingresos hoy</span>
-                <span class="rep-stat-v"><span class="cur">S/</span>{{ num(admin.data.value.revenueToday).toLocaleString('es-PE') }}</span>
+                <span class="rep-stat-v"><span class="cur">S/</span>{{ num(admin.data.value.revenueToday).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 <span class="rep-stat-meta">{{ admin.data.value.ordersToday }} pedidos · ticket {{ formatPEN(num(admin.data.value.avgTicket)) }}</span>
               </div>
               <div class="rep-stat">
@@ -340,7 +341,7 @@ function periodLabel(p: string): string {
             <div class="rep-stat-grid">
               <div class="rep-stat accent">
                 <span class="rep-stat-k">Ventas hoy</span>
-                <span class="rep-stat-v"><span class="cur">S/</span>{{ num(manager.data.value.revenueToday).toLocaleString('es-PE') }}</span>
+                <span class="rep-stat-v"><span class="cur">S/</span>{{ num(manager.data.value.revenueToday).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 <span class="rep-stat-meta">{{ manager.data.value.salesToday }} ticket{{ manager.data.value.salesToday === 1 ? '' : 's' }}</span>
               </div>
               <NuxtLink to="/app/pos" class="rep-stat link">
@@ -405,7 +406,7 @@ function periodLabel(p: string): string {
               <div class="rep-stat-grid three">
                 <div class="rep-stat accent">
                   <span class="rep-stat-k">Ingresos</span>
-                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(sales.data.value.totalRevenue).toLocaleString('es-PE') }}</span>
+                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(sales.data.value.totalRevenue).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 </div>
                 <div class="rep-stat">
                   <span class="rep-stat-k">Ventas</span>
@@ -587,7 +588,7 @@ function periodLabel(p: string): string {
               <div class="rep-stat-grid">
                 <div class="rep-stat accent">
                   <span class="rep-stat-k">Valor del stock</span>
-                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(inventory.data.value.totalStockValue).toLocaleString('es-PE') }}</span>
+                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(inventory.data.value.totalStockValue).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                   <span class="rep-stat-meta">{{ inventory.data.value.totalSkus }} insumos</span>
                 </div>
                 <div class="rep-stat">
@@ -757,7 +758,7 @@ function periodLabel(p: string): string {
               <div class="rep-stat-grid two">
                 <div class="rep-stat accent">
                   <span class="rep-stat-k">Costo de mermas</span>
-                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(waste.data.value.totalWasteCost).toLocaleString('es-PE') }}</span>
+                  <span class="rep-stat-v"><span class="cur">S/</span>{{ num(waste.data.value.totalWasteCost).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
                 </div>
                 <div class="rep-stat">
                   <span class="rep-stat-k">Cantidad total</span>

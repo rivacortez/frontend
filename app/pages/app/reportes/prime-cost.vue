@@ -31,10 +31,14 @@ function periodLabel(p: string): string {
 
 const pc = usePrimeCost(period, () => canManage.value)
 
-const num = (s: string | undefined | null) => Number(s ?? 0)
-function fmtPct(n: number | undefined): string {
-  return `${(n ?? 0).toFixed(2)}%`
-}
+// PrimeCostReportView fields (money AND percentages: primeCostPct, foodCostPct,
+// laborCostPct, benchmarks.*) are all Prisma Decimal strings, never `number` —
+// `toNumber`/`formatPercent` (app/utils/format.ts) are the single safe
+// coercion point. Root cause of the crash this fixes: the old `fmtPct` typed
+// its param as `number | undefined` and called `.toFixed()` directly on it;
+// the backend actually sends a string, so `(n ?? 0).toFixed` threw.
+const num = (s: string | number | undefined | null) => toNumber(s)
+const fmtPct = (n: string | number | undefined | null): string => formatPercent(n)
 
 // ===== Prime cost gauge SVG =====
 // Display scale: 0–80 % (beyond 80 % is catastrophic; the indicator is clamped).
@@ -62,7 +66,7 @@ const gaugeGoodEnd = computed(() => gaugeX(60))
 const gaugeWarnEnd = computed(() => gaugeX(65))
 const gaugeTrackEnd = GAUGE_W - GAUGE_PAD_H
 
-const gaugeNeedleX = computed(() => gaugeX(pc.data.value?.primeCostPct ?? 0))
+const gaugeNeedleX = computed(() => gaugeX(num(pc.data.value?.primeCostPct)))
 
 // ===== Sub-metric gauges (food cost + labor cost) =====
 // Each shows a 0–50% scale with the benchmark band highlighted.
@@ -151,6 +155,14 @@ watch(
       </div>
     </div>
 
+    <!--
+      Defect #2 (skeleton infinito): un throw dentro del render (p. ej. un
+      campo con forma inesperada) dejaba la vista congelada en el skeleton
+      porque Vue nunca llegaba a confirmar el nuevo árbol. NuxtErrorBoundary
+      captura cualquier excepción de render en este subárbol (main + aside) y
+      muestra un estado de error recuperable en vez de quedar colgada.
+    -->
+    <NuxtErrorBoundary>
     <div class="scr-body">
       <div class="scr-main">
         <RepError v-if="pc.error.value" @retry="pc.refresh()" />
@@ -384,8 +396,8 @@ watch(
                     <div
                       class="pc-sub-band"
                       :style="{
-                        left: `${(pc.data.value.benchmarks.foodCostGoodMin / SUBGAUGE_MAX) * 100}%`,
-                        width: `${((pc.data.value.benchmarks.foodCostGoodMax - pc.data.value.benchmarks.foodCostGoodMin) / SUBGAUGE_MAX) * 100}%`,
+                        left: `${(num(pc.data.value.benchmarks.foodCostGoodMin) / SUBGAUGE_MAX) * 100}%`,
+                        width: `${((num(pc.data.value.benchmarks.foodCostGoodMax) - num(pc.data.value.benchmarks.foodCostGoodMin)) / SUBGAUGE_MAX) * 100}%`,
                         background: 'rgba(110,123,97,0.25)',
                       }"
                     />
@@ -393,7 +405,7 @@ watch(
                     <div
                       class="pc-sub-fill"
                       :style="{
-                        width: `${Math.min(100, (pc.data.value.foodCostPct / SUBGAUGE_MAX) * 100)}%`,
+                        width: `${Math.min(100, (num(pc.data.value.foodCostPct) / SUBGAUGE_MAX) * 100)}%`,
                         background: STATUS_COLORS[pc.data.value.benchmarks.foodCostStatus],
                       }"
                     />
@@ -440,8 +452,8 @@ watch(
                     <div
                       class="pc-sub-band"
                       :style="{
-                        left: `${(pc.data.value.benchmarks.laborCostGoodMin / SUBGAUGE_MAX) * 100}%`,
-                        width: `${((pc.data.value.benchmarks.laborCostGoodMax - pc.data.value.benchmarks.laborCostGoodMin) / SUBGAUGE_MAX) * 100}%`,
+                        left: `${(num(pc.data.value.benchmarks.laborCostGoodMin) / SUBGAUGE_MAX) * 100}%`,
+                        width: `${((num(pc.data.value.benchmarks.laborCostGoodMax) - num(pc.data.value.benchmarks.laborCostGoodMin)) / SUBGAUGE_MAX) * 100}%`,
                         background: 'rgba(110,123,97,0.25)',
                       }"
                     />
@@ -449,7 +461,7 @@ watch(
                     <div
                       class="pc-sub-fill"
                       :style="{
-                        width: `${Math.min(100, (pc.data.value.laborCostPct / SUBGAUGE_MAX) * 100)}%`,
+                        width: `${Math.min(100, (num(pc.data.value.laborCostPct) / SUBGAUGE_MAX) * 100)}%`,
                         background: STATUS_COLORS[pc.data.value.benchmarks.laborCostStatus],
                       }"
                     />
@@ -540,12 +552,21 @@ watch(
             />
             <span>{{ STATUS_LABELS[pc.data.value.status] }}</span>
             <span class="pc-aside-status-sub">
-              Benchmark: ≤ {{ pc.data.value.benchmarks.primeCostGoodMax }} %
+              Benchmark: ≤ {{ num(pc.data.value.benchmarks.primeCostGoodMax) }} %
             </span>
           </div>
         </section>
       </aside>
     </div>
+
+    <template #error="{ clearError }">
+      <div class="scr-body">
+        <div class="scr-main">
+          <RepError @retry="() => { clearError(); pc.refresh() }" />
+        </div>
+      </div>
+    </template>
+    </NuxtErrorBoundary>
   </div>
 </template>
 

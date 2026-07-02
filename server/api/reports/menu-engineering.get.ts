@@ -19,8 +19,11 @@ export type MenuItemRecommendation =
 
 /**
  * Single item row returned by the menu-engineering endpoint.
- * Money fields (price, foodCost, contributionMargin, totalContribution) are
- * decimal strings (PEN); the frontend converts them to number only for display.
+ * Money AND ratio fields (price, foodCost, contributionMargin,
+ * totalContribution, popularityShare) are Prisma `Decimal` columns and arrive
+ * as decimal strings (e.g. `"0.0437"`), never `number` — `unitsSold` is the
+ * only genuine integer here. The frontend converts with `toNumber`/`num()`
+ * before formatting or arithmetic (never call `.toFixed()` directly on these).
  */
 export interface MenuEngineeringItemView {
   menuItemId: string;
@@ -31,7 +34,7 @@ export interface MenuEngineeringItemView {
   foodCost: Money;
   contributionMargin: Money;
   totalContribution: Money;
-  popularityShare: number;
+  popularityShare: Money;
   classification: MenuItemClassification;
   recommendation: MenuItemRecommendation;
 }
@@ -40,10 +43,11 @@ export interface MenuEngineeringItemView {
  * Full payload of GET /api/reports/menu-engineering.
  * `popularityCutoff` and `avgContributionMargin` are the cross-hair values that
  * divide the 2×2 matrix (mean popularity % and mean contribution margin).
+ * Both are Prisma `Decimal` → decimal strings, same as `Money`.
  */
 export interface MenuEngineeringReportView {
   period: string;
-  popularityCutoff: number;
+  popularityCutoff: Money;
   avgContributionMargin: Money;
   items: MenuEngineeringItemView[];
 }
