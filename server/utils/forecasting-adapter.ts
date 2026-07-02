@@ -184,7 +184,11 @@ export async function forecastShoppingSuggestions(
       // from `estimatedCost` even though both use `unitCost` today.
       shortfallCost: +(shortfall * unitCost).toFixed(2),
       reason: `Déficit de forecast: ${shortfall} ${s.unit}`,
-      urgent: shortfall > 0,
+      // OBS-3 · An item whose suggestion was capped to 0 by shelf life has a
+      // real deficit but nothing actionable to buy — flagging it URGENTE with
+      // S/ 0.00 reads as "buy 0 kg urgently". Urgency requires an actual
+      // purchasable quantity; the expanded row still explains the capped gap.
+      urgent: shortfall > 0 && suggestedQty > 0,
       checked: false,
       cappedByShelfLife: s.cappedByShelfLife,
       uncappedSuggestedQty:
