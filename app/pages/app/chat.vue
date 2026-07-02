@@ -62,6 +62,14 @@ const CATEGORIES: QueryCategory[] = [
       '¿Qué día de la semana vendo más?',
     ],
   },
+  {
+    label: 'Proyecciones',
+    questions: [
+      // F2b: única pregunta sobre el futuro — responde desde el forecast
+      // contextual real (ChatService.answerFuture), no genera SQL.
+      '¿Cuánto voy a vender este fin de semana?',
+    ],
+  },
 ]
 
 // ===== Input =====
@@ -226,7 +234,7 @@ function confirmClear(): void {
             </table>
           </div>
 
-          <!-- Respuesta en lenguaje natural -->
+          <!-- Respuesta en lenguaje natural (el disclaimer de proyección vive acá, siempre visible) -->
           <p v-if="m.content" class="bubble-text">
             <template v-for="(seg, si) in boldSegments(m.content)" :key="si">
               <b v-if="seg.bold">{{ seg.text }}</b>
@@ -234,8 +242,36 @@ function confirmClear(): void {
             </template>
           </p>
 
-          <!-- Badge de proveedor: transparencia sobre qué modelo respondió -->
-          <p v-if="m.provider" class="provider-badge">
+          <!-- Bloque de proyección (kind: future con datos) — reusa ForecastDriverChips de fase 3 -->
+          <div v-if="m.kind === 'future' && m.forecast" class="forecast-block">
+            <p class="forecast-tag">
+              <UIcon name="i-lucide-line-chart" class="forecast-tag-ico" aria-hidden="true" />
+              Proyección · {{ m.forecast.range.label }}
+            </p>
+            <p class="forecast-total">
+              {{ formatPEN(m.forecast.totalYhat) }}
+              <span class="forecast-band">
+                banda {{ formatPEN(m.forecast.totalLo) }} – {{ formatPEN(m.forecast.totalHi) }}
+              </span>
+            </p>
+            <!-- Detalle por día: solo aporta si el rango cubre más de un día -->
+            <ul v-if="m.forecast.points.length > 1" class="forecast-days">
+              <li v-for="p in m.forecast.points" :key="p.targetDate">
+                <span class="forecast-day-date">{{ formatShortDate(p.targetDate) }}</span>
+                <span class="forecast-day-val">{{ formatPEN(p.yhat) }}</span>
+              </li>
+            </ul>
+            <ForecastDriverChips
+              v-if="m.forecast.drivers.length"
+              :drivers="m.forecast.drivers"
+              :max-chips="3"
+            />
+          </div>
+
+          <!-- Badge de proveedor: transparencia sobre qué modelo respondió.
+               Oculto en proyecciones — el badge "Proyección" de arriba ya lo distingue
+               y "system · forecast-run" no aporta como transparencia de modelo LLM. -->
+          <p v-if="m.provider && m.kind !== 'future'" class="provider-badge">
             <UIcon name="i-lucide-cpu" class="provider-icon" aria-hidden="true" />
             {{ providerLabel(m) }}
           </p>
@@ -475,6 +511,69 @@ function confirmClear(): void {
 }
 .result-table td { padding: 8px 11px; border-top: 1px solid var(--border-subtle); color: var(--fg1); white-space: nowrap; }
 .result-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
+
+/* Bloque de proyección (F2b) — la única superficie con tinte de la pantalla
+   (regla anti-slop "un tinte por pantalla"): crema-100 sin gradiente, borde
+   sutil, misma familia visual que .sql/.result-wrap (radio 10px). */
+.forecast-block {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--crema-100);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.forecast-tag {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--terracotta-700);
+}
+.forecast-tag-ico { width: 12px; height: 12px; flex-shrink: 0; }
+.forecast-total {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg1);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.forecast-band {
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg2);
+}
+.forecast-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.forecast-days li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  padding: 3px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.forecast-days li:first-child { border-top: none; }
+.forecast-day-date { color: var(--fg2); }
+.forecast-day-val { color: var(--fg1); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Provider badge — one line, muted, non-decorative */
 .provider-badge {

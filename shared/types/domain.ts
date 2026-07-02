@@ -536,6 +536,57 @@ export interface ChatTableData {
   rows: (string | number | null)[][];
 }
 
+/**
+ * Classification of a chat question, computed server-side BEFORE deciding
+ * whether to call the NL2SQL pipeline (F2b / LOTE B3, backend
+ * `intent-classifier.util.ts`). `historical` is the original R1-R10 flow
+ * (unchanged). Optional/absent on legacy responses that predate this field —
+ * callers must treat a missing `kind` as `historical`.
+ */
+export type ChatQueryKind =
+  "historical" | "future" | "out_of_domain" | "ambiguous";
+
+/**
+ * Single day within a `ChatForecastMeta.points` array. Mirrors the backend's
+ * `forecastPointSchema` (core-ai contract), mapped from snake_case at the BFF.
+ */
+export interface ChatForecastPoint {
+  targetDate: string;
+  yhat: number;
+  yhatLo: number;
+  yhatHi: number;
+}
+
+/** Resolved date range the user asked about (e.g. "este fin de semana"). */
+export interface ChatForecastRange {
+  from: string;
+  to: string;
+  label: string;
+}
+
+/**
+ * Structured forecast payload attached to a `kind: 'future'` chat response
+ * when the backend had a completed run covering the requested range (F2b /
+ * LOTE B3). Carries the SAME numbers already narrated in `ChatMessage.content`
+ * as plain text, but in a shape the UI can render as a compact visual block
+ * (total + band, day-by-day breakdown, drivers) instead of parsing the
+ * answer string. Absent when `kind === 'future'` but the backend had no data
+ * for the range (e.g. `needsForecast`/out-of-horizon) — in that case only
+ * `content` carries the explanation.
+ */
+export interface ChatForecastMeta {
+  /** `ForecastRun` id backing these numbers — for traceability/audit. */
+  runId: string;
+  range: ChatForecastRange;
+  totalYhat: number;
+  totalLo: number;
+  totalHi: number;
+  /** Day-level breakdown within `range`. */
+  points: ChatForecastPoint[];
+  /** Exogenous drivers (holidays, payday, weather...) within the same range. */
+  drivers: ForecastDriver[];
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -549,6 +600,10 @@ export interface ChatMessage {
   provider?: string;
   /** Model identifier from the provider (e.g. "gpt-4o"). */
   model?: string;
+  /** ADDITIVE (F2b) — question classification; absent on legacy responses. */
+  kind?: ChatQueryKind;
+  /** ADDITIVE (F2b) — present only when `kind === 'future'` and data was available. */
+  forecast?: ChatForecastMeta;
   createdAt: string;
 }
 

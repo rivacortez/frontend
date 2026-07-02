@@ -69,6 +69,10 @@ export function useChatQuery() {
         table,
         provider: result.provider,
         model: result.model,
+        // ADDITIVE (F2b) — `kind`/`forecast` are `undefined` on legacy responses;
+        // the UI treats a missing `kind` as `historical` (zero behavior change).
+        kind: result.kind,
+        forecast: result.forecast,
         createdAt: new Date().toISOString(),
       });
     } catch (error) {

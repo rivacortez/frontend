@@ -39,7 +39,7 @@ interface BeForecastSuggestion {
  * strict enum) because a still-unknown kind must survive the round trip and
  * degrade to a generic badge client-side, never throw during JSON parsing.
  */
-interface BeForecastDriver {
+export interface BeForecastDriver {
   date: string;
   kind: string;
   label: string;
@@ -106,8 +106,13 @@ interface BeForecastAccuracyData {
 const num = (s: string | null | undefined): number =>
   s == null ? 0 : Number(s);
 
-/** Maps the backend's snake_case driver shape to the frontend's camelCase view. */
-function toDriver(d: BeForecastDriver): ForecastDriver {
+/**
+ * Maps the backend's snake_case driver shape to the frontend's camelCase view.
+ * Exported for reuse by other BFF routes that embed drivers in their payload
+ * (e.g. `server/api/chat/query.post.ts`'s `forecast.drivers`, F2b) — same
+ * backend contract (`forecastDriverSchema`), no reason to duplicate the mapping.
+ */
+export function toDriver(d: BeForecastDriver): ForecastDriver {
   return {
     date: d.date,
     kind: d.kind,
